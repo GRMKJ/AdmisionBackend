@@ -14,7 +14,7 @@ return new class extends Migration {
             $table->foreign('id_carrera')
                   ->references('id_carreras')->on('carreras')
                   ->cascadeOnUpdate()
-                  ->restrictOnDelete(); // evita borrar carrera con aspirantes
+                  ->noActionOnDelete(); // evita borrar carrera con aspirantes
 
             $table->string('nombre', 150);
             $table->string('ap_paterno', 150);

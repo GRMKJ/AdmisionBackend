@@ -3,11 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\Auth\User as Authenticatable; // <- cambia
+use Laravel\Sanctum\HasApiTokens;
 
-class Alumno extends Model
+class Alumno extends Authenticatable
 {
-    use HasFactory;
+    use HasApiTokens, HasFactory;
 
     protected $table = 'alumnos';
     protected $primaryKey = 'id_inscripcion';
@@ -15,10 +16,12 @@ class Alumno extends Model
     protected $keyType = 'int';
 
     protected $fillable = [
-        'id_aspirantes', 'fecha_inscripcion', 'nombre_carrera', 'matricula',
-        'fecha_inicio_clase', 'fecha_fin_clases', 'correo_instituto',
-        'numero_seguro_social', 'estatus',
+        'id_aspirantes','fecha_inscripcion','nombre_carrera','matricula',
+        'fecha_inicio_clase','fecha_fin_clases','correo_instituto',
+        'numero_seguro_social','estatus','password',
     ];
+
+    protected $hidden = ['password'];
 
     protected $casts = [
         'fecha_inscripcion' => 'date',
@@ -27,9 +30,5 @@ class Alumno extends Model
         'estatus' => 'integer',
     ];
 
-    // Relaciones
-    public function aspirante()
-    {
-        return $this->belongsTo(Aspirante::class, 'id_aspirantes', 'id_aspirantes');
-    }
+    public function aspirante(){ return $this->belongsTo(Aspirante::class, 'id_aspirantes', 'id_aspirantes'); }
 }

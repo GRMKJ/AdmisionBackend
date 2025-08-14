@@ -21,7 +21,7 @@ return new class extends Migration {
             $table->foreign('id_configuracion')
                   ->references('id_configuracion')->on('configuracion_pagos')
                   ->cascadeOnUpdate()
-                  ->restrictOnDelete();
+                  ->noActionOnDelete();
 
             $table->string('tipo_pago', 50)->nullable();   // ej: inscripción, colegiatura, etc.
             $table->string('metodo_pago', 50)->nullable(); // efectivo, transferencia, tarjeta...

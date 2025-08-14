@@ -3,11 +3,12 @@
 namespace App\Models;
 
 use Illuminate\Database\Eloquent\Factories\HasFactory;
-use Illuminate\Database\Eloquent\Model;
+use Illuminate\Foundation\Auth\User as Authenticatable; // <- cambia
+use Laravel\Sanctum\HasApiTokens;
 
-class Aspirante extends Model
+class Aspirante extends Authenticatable
 {
-    use HasFactory;
+    use HasApiTokens, HasFactory;
 
     protected $table = 'aspirantes';
     protected $primaryKey = 'id_aspirantes';
@@ -15,33 +16,19 @@ class Aspirante extends Model
     protected $keyType = 'int';
 
     protected $fillable = [
-        'id_carrera', 'nombre', 'ap_paterno', 'ap_materno',
-        'telefono', 'fecha_registro', 'estatus',
+        'id_carrera','nombre','ap_paterno','ap_materno','telefono',
+        'fecha_registro','estatus','curp','password',
     ];
+
+    protected $hidden = ['password'];
 
     protected $casts = [
         'fecha_registro' => 'date',
         'estatus' => 'integer',
     ];
 
-    // Relaciones
-    public function carrera()
-    {
-        return $this->belongsTo(Carrera::class, 'id_carrera', 'id_carreras');
-    }
-
-    public function alumno()
-    {
-        return $this->hasOne(Alumno::class, 'id_aspirantes', 'id_aspirantes');
-    }
-
-    public function documentos()
-    {
-        return $this->hasMany(Documento::class, 'id_aspirantes', 'id_aspirantes');
-    }
-
-    public function pagos()
-    {
-        return $this->hasMany(Pago::class, 'id_aspirantes', 'id_aspirantes');
-    }
+    public function carrera(){ return $this->belongsTo(Carrera::class, 'id_carrera', 'id_carreras'); }
+    public function alumno(){ return $this->hasOne(Alumno::class, 'id_aspirantes', 'id_aspirantes'); }
+    public function documentos(){ return $this->hasMany(Documento::class, 'id_aspirantes', 'id_aspirantes'); }
+    public function pagos(){ return $this->hasMany(Pago::class, 'id_aspirantes', 'id_aspirantes'); }
 }
