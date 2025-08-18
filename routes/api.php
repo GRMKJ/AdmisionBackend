@@ -4,7 +4,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\{
     AuthUnifiedController,
     AspiranteController, AlumnoController, CarreraController,
-    DocumentoController, ConfiguracionPagoController, PagoController
+    DocumentoController, ConfiguracionPagoController, PagoController, AuthAspiranteController
 };
 
 Route::prefix('v1')->group(function () {
@@ -78,4 +78,21 @@ Route::prefix('v1')->group(function () {
             ->middleware('ability:role:alumno,role:aspirante,role:administrativo')
             ->name('pagos.deleteComprobante');
     });
+        // Auth aspirante
+    Route::post('aspirantes/register', [AuthAspiranteController::class, 'register']);
+    Route::post('aspirantes/login',    [AuthAspiranteController::class, 'login']);
+
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::get('aspirantes/me',      [AuthAspiranteController::class, 'me']);
+        Route::post('aspirantes/logout', [AuthAspiranteController::class, 'logout']);
+    });
+
+    // Carreras (público)
+    Route::get('catalogos/carreras', [CarreraController::class, 'index']);
+
+        Route::post('aspirantes/start', [AuthAspiranteController::class, 'start']);
+    Route::middleware('auth:sanctum')->group(function () {
+        Route::put('aspirantes/carrera', [AuthAspiranteController::class, 'setCarrera']);
+    });
+
 });
