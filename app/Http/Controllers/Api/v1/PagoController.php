@@ -11,6 +11,8 @@ use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
+use App\Models\Aspirante;
+use App\Models\Bachillerato;
 
 class PagoController extends Controller
 {
@@ -20,21 +22,27 @@ class PagoController extends Controller
     {
         $q = Pago::query()->with(['aspirante', 'configuracion']);
 
-        if ($request->filled('id_aspirantes'))   $q->where('id_aspirantes', $request->integer('id_aspirantes'));
-        if ($request->filled('id_configuracion'))$q->where('id_configuracion', $request->integer('id_configuracion'));
-        if ($tp = $request->get('tipo'))         $q->where('tipo_pago', $tp);
-        if ($met = $request->get('metodo'))      $q->where('metodo_pago', $met);
-        if ($desde = $request->get('desde'))     $q->whereDate('fecha_pago', '>=', $desde);
-        if ($hasta = $request->get('hasta'))     $q->whereDate('fecha_pago', '<=', $hasta);
+        if ($request->filled('id_aspirantes'))
+            $q->where('id_aspirantes', $request->integer('id_aspirantes'));
+        if ($request->filled('id_configuracion'))
+            $q->where('id_configuracion', $request->integer('id_configuracion'));
+        if ($tp = $request->get('tipo'))
+            $q->where('tipo_pago', $tp);
+        if ($met = $request->get('metodo'))
+            $q->where('metodo_pago', $met);
+        if ($desde = $request->get('desde'))
+            $q->whereDate('fecha_pago', '>=', $desde);
+        if ($hasta = $request->get('hasta'))
+            $q->whereDate('fecha_pago', '<=', $hasta);
 
         $rows = $q->latest('id_pagos')->paginate((int) $request->get('per_page', 15));
 
         return $this->ok([
             'pagination' => [
                 'current_page' => $rows->currentPage(),
-                'per_page'     => $rows->perPage(),
-                'total'        => $rows->total(),
-                'last_page'    => $rows->lastPage(),
+                'per_page' => $rows->perPage(),
+                'total' => $rows->total(),
+                'last_page' => $rows->lastPage(),
             ],
             'data' => PagoResource::collection($rows->items()),
         ]);
@@ -46,7 +54,7 @@ class PagoController extends Controller
 
         // Manejar comprobante si viene
         if ($request->hasFile('comprobante')) {
-            $dir = 'comprobantes/'.($data['id_aspirantes']);
+            $dir = 'comprobantes/' . ($data['id_aspirantes']);
             $path = $request->file('comprobante')->storeAs(
                 $dir,
                 $this->buildFileName($request->file('comprobante')->getClientOriginalName()),
@@ -56,14 +64,14 @@ class PagoController extends Controller
         }
 
         $row = Pago::create($data);
-        $row->load(['aspirante','configuracion']);
+        $row->load(['aspirante', 'configuracion']);
 
         return $this->ok(new PagoResource($row), 'Creado', 201);
     }
 
     public function show(Pago $pago)
     {
-        $pago->load(['aspirante','configuracion']);
+        $pago->load(['aspirante', 'configuracion']);
         return $this->ok(new PagoResource($pago));
     }
 
@@ -82,7 +90,7 @@ class PagoController extends Controller
             if ($pago->comprobante_pago) {
                 Storage::disk('public')->delete($pago->comprobante_pago);
             }
-            $dir = 'comprobantes/'.($data['id_aspirantes'] ?? $pago->id_aspirantes);
+            $dir = 'comprobantes/' . ($data['id_aspirantes'] ?? $pago->id_aspirantes);
             $path = $request->file('comprobante')->storeAs(
                 $dir,
                 $this->buildFileName($request->file('comprobante')->getClientOriginalName()),
@@ -92,7 +100,7 @@ class PagoController extends Controller
         }
 
         $pago->update($data);
-        $pago->load(['aspirante','configuracion']);
+        $pago->load(['aspirante', 'configuracion']);
 
         return $this->ok(new PagoResource($pago), 'Actualizado');
     }
@@ -113,14 +121,14 @@ class PagoController extends Controller
     public function uploadComprobante(Request $request, Pago $pago)
     {
         $request->validate([
-            'comprobante' => ['required','file','max:5120','mimes:pdf,jpg,jpeg,png'],
+            'comprobante' => ['required', 'file', 'max:5120', 'mimes:pdf,jpg,jpeg,png'],
         ]);
 
         if ($pago->comprobante_pago) {
             Storage::disk('public')->delete($pago->comprobante_pago);
         }
 
-        $dir = 'comprobantes/'.$pago->id_aspirantes;
+        $dir = 'comprobantes/' . $pago->id_aspirantes;
         $path = $request->file('comprobante')->storeAs(
             $dir,
             $this->buildFileName($request->file('comprobante')->getClientOriginalName()),
@@ -151,7 +159,44 @@ class PagoController extends Controller
     private function buildFileName(string $original): string
     {
         $name = pathinfo($original, PATHINFO_FILENAME);
-        $ext  = strtolower(pathinfo($original, PATHINFO_EXTENSION));
-        return Str::slug($name).'-'.time().'.'.$ext;
+        $ext = strtolower(pathinfo($original, PATHINFO_EXTENSION));
+        return Str::slug($name) . '-' . time() . '.' . $ext;
     }
+
+    public function storeAspirantePago(Request $request)
+    {
+        $request->validate([
+            'bachillerato_id' => 'required|exists:bachilleratos,id_bachillerato',
+            'promedio' => 'required|numeric|min:0|max:10',
+            'carrera_id' => 'required|exists:carreras,id_carreras',
+            'referencia' => 'required|string|max:255',
+        ]);
+
+        $aspirante = auth()->user();
+
+        // Asociar Aspirante con el bachillerato existente
+        $aspirante->id_bachillerato = $request->bachillerato_id;
+        $aspirante->id_carrera = $request->carrera_id;
+        $aspirante->promedio_general = $request->promedio;
+        $aspirante->progress_step = 3; // Actualizar paso a 3 (pago)
+        $aspirante->save();
+
+        // Crear Pago
+        $pago = Pago::create([
+            'id_aspirantes' => $aspirante->id_aspirantes,
+            'id_configuracion' => 1,
+            'tipo_pago' => 'admisión',
+            'metodo_pago' => 'deposito',
+            'fecha_pago' => now(),
+            'referencia' => $request->referencia,
+        ]);
+
+        return response()->json([
+            'message' => 'Registro de pago exitoso',
+            'aspirante' => $aspirante->load('bachillerato', 'carrera'),
+            'pago' => $pago,
+        ]);
+    }
+
+
 }

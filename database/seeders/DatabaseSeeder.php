@@ -15,6 +15,7 @@ class DatabaseSeeder extends Seeder
             AlumnosSeeder::class,
             DocumentosSeeder::class,
             PagosSeeder::class,
+            BachilleratoSeeder::class,
         ]);
     }
 }

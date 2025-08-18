@@ -11,7 +11,7 @@ class CarreraController extends Controller
     public function index()
     {
         return CarreraResource::collection(
-            Carrera::query()->where('activo', 1)->orderBy('nombre')->get()
+            Carrera::query()->where('estatus', 1)->orderBy('carrera')->get()
         );
     }
 }

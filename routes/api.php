@@ -3,9 +3,19 @@
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\Api\V1\{
     AuthUnifiedController,
-    AspiranteController, AlumnoController, CarreraController,
-    DocumentoController, ConfiguracionPagoController, PagoController, AuthAspiranteController
+    AspiranteController,
+    AlumnoController,
+    CarreraController,
+    DocumentoController,
+    ConfiguracionPagoController,
+    PagoController,
+    AuthAspiranteController,
+    BachilleratoController,
+    DashboardController,
+    AdministradorController
 };
+
+Route::get('/login', fn() => abort(401, 'No autenticado'))->name('login');
 
 Route::prefix('v1')->group(function () {
 
@@ -17,7 +27,7 @@ Route::prefix('v1')->group(function () {
     Route::middleware('auth:sanctum')->group(function () {
 
         // Perfil / Logout
-        Route::get('auth/me',      [AuthUnifiedController::class, 'me']);
+        Route::get('auth/me', [AuthUnifiedController::class, 'me']);
         Route::post('auth/logout', [AuthUnifiedController::class, 'logout']);
 
         /** ========== CATÁLOGOS + ADMIN-ONLY ========== */
@@ -41,11 +51,11 @@ Route::prefix('v1')->group(function () {
         // - Cualquier rol autenticado puede entrar (alumno/aspirante/admin)
         // - La Policy de Documento restringe a "dueño" o "admin"
         Route::apiResource('documentos', DocumentoController::class)
-            ->only(['index','show','store','update','destroy'])
+            ->only(['index', 'show', 'store', 'update', 'destroy'])
             ->middleware('ability:role:alumno,role:aspirante,role:administrativo');
 
         // Subir / borrar SOLO archivo del documento (mismo criterio que arriba)
-        Route::post('documentos/{documento}/archivo',  [DocumentoController::class, 'uploadFile'])
+        Route::post('documentos/{documento}/archivo', [DocumentoController::class, 'uploadFile'])
             ->middleware('ability:role:alumno,role:aspirante,role:administrativo')
             ->name('documentos.upload');
 
@@ -70,29 +80,50 @@ Route::prefix('v1')->group(function () {
             ->middleware('ability:role:alumno,role:aspirante,role:administrativo');
 
         // Subida/borrado de comprobante de pago (mismo criterio)
-        Route::post('pagos/{pago}/comprobante',  [PagoController::class, 'uploadComprobante'])
+        Route::post('pagos/{pago}/comprobante', [PagoController::class, 'uploadComprobante'])
             ->middleware('ability:role:alumno,role:aspirante,role:administrativo')
             ->name('pagos.uploadComprobante');
 
         Route::delete('pagos/{pago}/comprobante', [PagoController::class, 'deleteComprobante'])
             ->middleware('ability:role:alumno,role:aspirante,role:administrativo')
             ->name('pagos.deleteComprobante');
-    });
-        // Auth aspirante
-    Route::post('aspirantes/register', [AuthAspiranteController::class, 'register']);
-    Route::post('aspirantes/login',    [AuthAspiranteController::class, 'login']);
 
-    Route::middleware('auth:sanctum')->group(function () {
-        Route::get('aspirantes/me',      [AuthAspiranteController::class, 'me']);
+        Route::post('/aspirantes/pago', [PagoController::class, 'storeAspirantePago'])
+            ->middleware('ability:role:aspirante')
+            ->name('aspirantes.storePago');
+
+        Route::get('/aspirantes/folio', [AspiranteController::class, 'checkFolio']);
+
+        // 🔹 Luego la dinámica, restringida a números
+        Route::get('/aspirantes/{aspirante}', [AspiranteController::class, 'show'])
+            ->whereNumber('aspirante');
+
+
+        Route::get('aspirantes/me', [AuthAspiranteController::class, 'me']);
+
         Route::post('aspirantes/logout', [AuthAspiranteController::class, 'logout']);
+        Route::get('/admin/pago/{referencia}', [AdministradorController::class, 'showAspirantePorReferencia']);
+        Route::post('/admin/pago/{referencia}/validar', [AdministradorController::class, 'validarPago']);
+        Route::post('/admin/pago/{referencia}/generar-folio', [AdministradorController::class, 'generarFolio']);
+
+
+
     });
 
-    // Carreras (público)
+    Route::middleware(['auth:sanctum', 'ability:role:administrativo'])
+    ->get('/admin/dashboard/stats', [DashboardController::class, 'stats']);
+
+    Route::middleware(['auth:sanctum', 'ability:role:administrativo'])->group(function () {
+        Route::get('/admin/aspirantes', [AdministradorController::class, 'aspirantes']);
+    });
+
+
+    // Auth aspirante
+    Route::post('aspirantes/register', [AuthAspiranteController::class, 'register']);
+    Route::post('aspirantes/login', [AuthAspiranteController::class, 'login']);
     Route::get('catalogos/carreras', [CarreraController::class, 'index']);
-
-        Route::post('aspirantes/start', [AuthAspiranteController::class, 'start']);
-    Route::middleware('auth:sanctum')->group(function () {
-        Route::put('aspirantes/carrera', [AuthAspiranteController::class, 'setCarrera']);
-    });
-
+    Route::get('catalogos/bachilleratos', [BachilleratoController::class, 'index']);
+    Route::post('catalogos/bachilleratos', [BachilleratoController::class, 'store']);
+    Route::post('aspirantes/start', [AuthAspiranteController::class, 'start']);
 });
+

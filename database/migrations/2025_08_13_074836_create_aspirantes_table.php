@@ -10,7 +10,7 @@ return new class extends Migration {
             $table->id('id_aspirantes');
 
             // FK -> carreras(id_carreras)
-            $table->unsignedBigInteger('id_carrera');
+            $table->unsignedBigInteger('id_carrera')->nullable();
             $table->foreign('id_carrera')
                   ->references('id_carreras')->on('carreras')
                   ->cascadeOnUpdate()
@@ -22,6 +22,7 @@ return new class extends Migration {
             $table->string('telefono', 20)->nullable();
             $table->date('fecha_registro')->nullable();
             $table->tinyInteger('estatus')->default(1);
+            $table->decimal('promedio_general', 3, 2)->nullable();
             $table->timestamps();
         });
     }

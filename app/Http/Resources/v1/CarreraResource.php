@@ -10,11 +10,11 @@ class CarreraResource extends JsonResource
     public function toArray(Request $request): array
     {
         return [
-            'id'   => $this->id_carreras,
-            'clave'=> $this->clave ?? null,
-            'nombre' => $this->nombre,
-            'nivel'  => $this->nivel ?? null,
-            'activo' => (bool) ($this->activo ?? 1),
+            'id_carreras'   => $this->id_carreras,
+            'carrera'=> $this->carrera,
+            'duracion' => $this->duracion,
+            'descripcion'  => $this->descripcion ?? null,
+            'estatus' => (bool) ($this->estatus ?? 1),
         ];
     }
 }

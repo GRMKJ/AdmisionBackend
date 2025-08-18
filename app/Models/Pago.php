@@ -17,13 +17,21 @@ class Pago extends Model
     protected $keyType = 'int';
 
     protected $fillable = [
-        'id_aspirantes', 'id_configuracion', 'tipo_pago', 'metodo_pago',
-        'fecha_pago', 'referencia', 'comprobante_pago',
+        'id_aspirantes',
+        'id_configuracion',
+        'tipo_pago',
+        'metodo_pago',
+        'fecha_pago',
+        'referencia',
+        'estado_validacion',
+        'id_admin_validador',
     ];
 
     protected $casts = [
         'fecha_pago' => 'date',
     ];
+
+    
 
     protected $appends = ['comprobante_url'];
 
@@ -34,4 +42,11 @@ class Pago extends Model
     {
         return $this->diskUrl('public', $this->comprobante_pago);
     }
+
+    public function adminValidador()
+    {
+        return $this->belongsTo(User::class, 'id_admin_validador');
+    }
+
+
 }

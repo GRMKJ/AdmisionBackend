@@ -27,6 +27,9 @@ return Application::configure(basePath: dirname(__DIR__))
         /**
          * Aliases de middlewares (reemplazan lo que antes iba en Kernel::$routeMiddleware)
          */
+        $middleware->redirectGuestsTo(function ($request) {
+            return $request->is('api/*') ? null : '/login'; // o null si no tienes login web
+        });
         $middleware->alias([
             // Auth básico de tu app (pon los que uses)
             //'auth'       => Authenticate::class,
