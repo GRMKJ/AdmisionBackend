@@ -82,15 +82,15 @@ class AuthAspiranteController extends Controller
             'ap_materno' => ['nullable', 'string', 'max:150'],
             'curp' => ['required', 'string', 'max:18', 'unique:aspirantes,curp'],
             'password' => ['required', Password::min(8)->numbers()->mixedCase()],
-            'email' => ['nullable', 'email', 'max:255'], // 👈 opcional si lo usas
-            // Si también recibes estos campos, agrégalos:
+            'email' => ['nullable', 'email', 'max:255'],
+
             'sexo' => ['nullable', 'in:H,M'],
             'fecha_nacimiento' => ['nullable', 'date'],
             'estado_nacimiento' => ['nullable', 'string', 'max:3'],
-            'step' => ['nullable', 'integer', 'min:2', 'max:6'], // opcional, inicia en 1 si no se manda
+            'step' => ['nullable', 'integer', 'min:2', 'max:6'],
         ]);
 
-        $plainPassword = $data['password'];        // 👈 guardamos el plaintext PARA EL CORREO
+        $plainPassword = $data['password'];
         $email = $data['email'] ?? null;
 
         $asp = Aspirante::create([
@@ -102,24 +102,21 @@ class AuthAspiranteController extends Controller
             'estatus' => 1,              // “pre-registrado”
             'fecha_registro' => now(),
 
-            // Solo si tu tabla tiene estas columnas (si no, quítalas o agrega migración):
+
             'sexo' => $data['sexo'] ?? null,
             'fecha_nacimiento' => $data['fecha_nacimiento'] ?? null,
             'estado_nacimiento' => $data['estado_nacimiento'] ?? null,
-            'email' => $email, // opcional si quieres guardarlo
-            'progress_step' => $data['step'] ?? 1, // inicia en paso 1 si no se manda
+            'email' => $email,
+            'progress_step' => $data['step'] ?? 1,
         ]);
 
-        // 🔐 Token para el front
+
         $token = $asp->createToken('mobile', ['role:aspirante'])->plainTextToken;
 
-        // ✉️ Enviar correo con la contraseña temporal (solo si tenemos email)
         if ($email) {
             try {
-                // send() = sin colas | queue() = con colas
                 Mail::to($email)->send(new AspirantePasswordMailable($asp, $plainPassword));
             } catch (\Throwable $e) {
-                // No interrumpas el flujo por fallo de correo; registra si quieres
                 report($e);
             }
         }

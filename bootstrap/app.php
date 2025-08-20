@@ -23,6 +23,11 @@ return Application::configure(basePath: dirname(__DIR__))
         commands: __DIR__.'/../routes/console.php',
         health: '/up',
     )
+    ->withProviders([
+        Illuminate\Filesystem\FilesystemServiceProvider::class,
+        // Si usas Sanctum y no lo auto-descubre, agrega también:
+        // Laravel\Sanctum\SanctumServiceProvider::class,
+    ])
     ->withMiddleware(function (Middleware $middleware) {
         /**
          * Aliases de middlewares (reemplazan lo que antes iba en Kernel::$routeMiddleware)

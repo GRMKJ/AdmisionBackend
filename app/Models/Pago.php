@@ -30,8 +30,10 @@ class Pago extends Model
     protected $casts = [
         'fecha_pago' => 'date',
     ];
+    public const EST_PENDIENTE = 0;
+    public const EST_VALIDADO  = 1;
+    public const EST_INVALIDO  = 2;
 
-    
 
     protected $appends = ['comprobante_url'];
 
@@ -48,5 +50,13 @@ class Pago extends Model
         return $this->belongsTo(User::class, 'id_admin_validador');
     }
 
+    public function getEstadoValidacionTextoAttribute(): string
+    {
+        return match ($this->estado_validacion) {
+            self::EST_VALIDADO  => 'Validado',
+            self::EST_INVALIDO  => 'Referencia Inválida',
+            default             => 'Pendiente de Validación',
+        };
+    }
 
 }

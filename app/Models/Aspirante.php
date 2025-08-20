@@ -58,4 +58,9 @@ class Aspirante extends Authenticatable
     {
         return $this->belongsTo(Bachillerato::class, 'id_bachillerato', 'id_bachillerato');
     }
+
+    public function deviceTokens()
+    {
+        return $this->hasMany(DeviceToken::class, 'id_aspirantes', 'id_aspirantes');
+    }
 }

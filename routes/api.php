@@ -12,7 +12,8 @@ use App\Http\Controllers\Api\V1\{
     AuthAspiranteController,
     BachilleratoController,
     DashboardController,
-    AdministradorController
+    AdministradorController,
+    AdminPagoController
 };
 
 Route::get('/login', fn() => abort(401, 'No autenticado'))->name('login');
@@ -105,17 +106,34 @@ Route::prefix('v1')->group(function () {
         Route::get('/admin/pago/{referencia}', [AdministradorController::class, 'showAspirantePorReferencia']);
         Route::post('/admin/pago/{referencia}/validar', [AdministradorController::class, 'validarPago']);
         Route::post('/admin/pago/{referencia}/generar-folio', [AdministradorController::class, 'generarFolio']);
-
-
-
     });
 
     Route::middleware(['auth:sanctum', 'ability:role:administrativo'])
-    ->get('/admin/dashboard/stats', [DashboardController::class, 'stats']);
+        ->get('/admin/dashboard/stats', [DashboardController::class, 'stats']);
 
     Route::middleware(['auth:sanctum', 'ability:role:administrativo'])->group(function () {
         Route::get('/admin/aspirantes', [AdministradorController::class, 'aspirantes']);
     });
+
+    Route::middleware(['auth:sanctum', 'ability:role:administrativo'])->prefix('admin')->group(function () {
+        Route::get('/pago/{referencia}', [AdminPagoController::class, 'show']);
+        Route::post('/pago/{referencia}/validar', [AdminPagoController::class, 'validar']);
+        Route::post('/pago/{referencia}/invalidar', [AdminPagoController::class, 'invalidar']); // opcional
+        Route::post('/pago/{referencia}/generar-folio', [AdminPagoController::class, 'generarFolio']);
+    });
+
+    Route::middleware(['auth:sanctum'])->post('/fcm/register', function (\Illuminate\Http\Request $r) {
+        $user = $r->user();
+        $aspId = $user?->id_aspirantes ?? null;
+
+        \App\Models\DeviceToken::updateOrCreate(
+            ['fcm_token' => $r->string('fcm_token')],
+            ['id_aspirantes' => $aspId, 'platform' => $r->string('platform')]
+        );
+
+        return response()->json(['ok' => true]);
+    });
+
 
 
     // Auth aspirante
