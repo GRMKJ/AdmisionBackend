@@ -37,6 +37,7 @@ Route::prefix('v1')->group(function () {
     Route::post('auth/login', [AuthUnifiedController::class, 'login']);
     // Recuperación de acceso (autodetección de tipo y opciones)
     Route::post('auth/forgot', [AuthUnifiedController::class, 'forgot']);
+    Route::post('auth/reset', [AuthUnifiedController::class, 'reset']);
 
     // Rutas protegidas por token Sanctum
     Route::middleware('auth:sanctum')->group(function () {

@@ -54,6 +54,11 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    // URL del frontend (para armar links de restablecimiento)
+    'front_url' => env('FRONTEND_URL', env('APP_URL', 'http://localhost')),
+    // Ruta del frontend para restablecer (puedes ajustarla en .env FRONTEND_RESET_PATH)
+    'password_reset_path' => env('FRONTEND_RESET_PATH', '/restablecer'),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone

@@ -16,7 +16,7 @@ class Administrativo extends Authenticatable
     protected $keyType = 'int';
 
     protected $fillable = [
-        'numero_empleado','nombre','ap_paterno','ap_materno','password','estatus',
+        'numero_empleado','nombre','ap_paterno','ap_materno','password','estatus','email',
     ];
 
     protected $hidden = ['password'];
