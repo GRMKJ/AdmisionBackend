@@ -60,10 +60,30 @@ class AspiranteController extends Controller
         return $this->ok(new AspiranteResource($asp), 'Creado', 201);
     }
 
-    public function show(Aspirante $aspirante)
+    public function show($aspirante)
     {
-        $aspirante->load('carrera');
-        return $this->ok(new AspiranteResource($aspirante));
+        $asp = Aspirante::query()
+            ->with([
+                'carrera',
+                'bachillerato',
+                'documentos.validador',
+                'pagos.configuracion',
+            ])
+            ->where(function ($q) use ($aspirante) {
+                $q->where('id_aspirantes', $aspirante)
+                    ->orWhere('folio_examen', $aspirante)
+                    ->orWhere('curp', $aspirante);
+            })
+            ->first();
+
+        if (!$asp) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aspirante no encontrado',
+            ], 404);
+        }
+
+        return $this->ok(new AspiranteResource($asp));
     }
 
     public function update(AspiranteUpdateRequest $request, Aspirante $aspirante)
