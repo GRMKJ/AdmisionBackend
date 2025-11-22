@@ -108,7 +108,6 @@ return [
             'encrypt' => env('DB_ENCRYPT', 'yes'),
             'trust_server_certificate' => env('DB_TRUST_SERVER_CERTIFICATE', 'true'),
             'options' => [
-                PDO::SQLSRV_ATTR_FETCHES_NUMERIC_TYPE => true,
                 "TrustServerCertificate" => env('DB_TRUST_SERVER_CERTIFICATE', true),
             ],
         ],

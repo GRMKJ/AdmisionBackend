@@ -20,6 +20,14 @@ use App\Http\Controllers\Api\V1\{
 
 Route::get('/login', fn() => abort(401, 'No autenticado'))->name('login');
 
+Route::get('/health', function () {
+    return response()->json([
+        'ok' => true,
+        'message' => 'API operativa',
+        'timestamp' => now()->toIso8601String(),
+    ]);
+})->name('health');
+
 Route::post('/debug/send', function (Request $r, \Kreait\Firebase\Contract\Messaging $messaging) {
     $token = $r->input('token');
     $message = CloudMessage::withTarget('token', $token)
