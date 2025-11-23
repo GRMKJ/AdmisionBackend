@@ -82,12 +82,13 @@ class AuthAspiranteController extends Controller
             'ap_materno' => ['nullable', 'string', 'max:150'],
             'curp' => ['required', 'string', 'max:18', 'unique:aspirantes,curp'],
             'password' => ['required', Password::min(8)->numbers()->mixedCase()],
-            'email' => ['nullable', 'email', 'max:255'],
+            'email' => ['required', 'email', 'max:255'],
 
-            'sexo' => ['nullable', 'in:H,M'],
-            'fecha_nacimiento' => ['nullable', 'date'],
-            'estado_nacimiento' => ['nullable', 'string', 'max:3'],
-            'step' => ['nullable', 'integer', 'min:2', 'max:6'],
+            'sexo' => ['required', 'in:H,M,X'],
+            'fecha_nacimiento' => ['required', 'date'],
+            'estado_nacimiento' => ['required', 'string', 'max:3'],
+            'telefono' => ['required', 'string', 'max:15'],
+            'step' => ['required', 'integer', 'min:2', 'max:6'],
         ]);
 
         $plainPassword = $data['password'];
@@ -101,8 +102,6 @@ class AuthAspiranteController extends Controller
             'password' => Hash::make($plainPassword),
             'estatus' => 1,              // “pre-registrado”
             'fecha_registro' => now(),
-
-
             'sexo' => $data['sexo'] ?? null,
             'fecha_nacimiento' => $data['fecha_nacimiento'] ?? null,
             'estado_nacimiento' => $data['estado_nacimiento'] ?? null,
@@ -127,7 +126,7 @@ class AuthAspiranteController extends Controller
                 'id' => $asp->id_aspirantes,
                 'curp' => $asp->curp,
                 'role' => 'aspirante',
-                'redirect_to' => '/admision/pagoexamen',
+                'redirect_to' => '/admision/bachillerato',
             ],
         ], 'Pre-registro creado', 201);
     }
