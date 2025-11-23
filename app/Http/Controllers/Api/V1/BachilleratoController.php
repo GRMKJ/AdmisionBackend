@@ -3,7 +3,7 @@ namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
 use App\Models\Bachillerato;
-use App\Http\Resources\v1\BachilleratoResource;
+use App\Http\Resources\V1\BachilleratoResource;
 use Illuminate\Http\Request;
 class BachilleratoController extends Controller
 {
