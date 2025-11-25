@@ -8,9 +8,12 @@ use App\Models\Aspirante;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Schema;
 
 class ExamSyncService
 {
+    private ?bool $hasResultColumns = null;
+
     public function exportFolios(): array
     {
         $endpoint = config('exam.export_endpoint');
@@ -161,10 +164,11 @@ class ExamSyncService
 
     public function applyResult(Aspirante $aspirante, string $status, ?int $step = null): void
     {
-        $currentStatus = $aspirante->resultado_examen;
+        $canStoreMetadata = $this->canStoreResultMetadata();
+        $currentStatus = $canStoreMetadata ? $aspirante->resultado_examen : null;
         $shouldNotify = false;
 
-        if ($status !== $currentStatus) {
+        if ($canStoreMetadata && $status !== $currentStatus) {
             $aspirante->resultado_examen = $status;
             $aspirante->resultado_notificado_at = null;
             $shouldNotify = true;
@@ -202,7 +206,19 @@ class ExamSyncService
             Mail::to($aspirante->email)->send(new ExamResultRejectedMail($aspirante));
         }
 
-        $aspirante->resultado_notificado_at = now();
-        $aspirante->save();
+        if ($this->canStoreResultMetadata()) {
+            $aspirante->resultado_notificado_at = now();
+            $aspirante->save();
+        }
+    }
+
+    private function canStoreResultMetadata(): bool
+    {
+        if ($this->hasResultColumns === null) {
+            $this->hasResultColumns = Schema::hasColumn('aspirantes', 'resultado_examen')
+                && Schema::hasColumn('aspirantes', 'resultado_notificado_at');
+        }
+
+        return $this->hasResultColumns;
     }
 }
