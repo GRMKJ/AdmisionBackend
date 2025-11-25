@@ -66,7 +66,12 @@ class AuthAspiranteController extends Controller
 
     public function me(Request $request)
     {
-        return $this->ok(new AspiranteResource($request->user()));
+        $aspirante = $request->user();
+        if ($aspirante) {
+            $aspirante->loadMissing(['bachillerato', 'carrera']);
+        }
+
+        return $this->ok(new AspiranteResource($aspirante));
     }
 
     public function logout(Request $request)

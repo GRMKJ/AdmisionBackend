@@ -176,9 +176,18 @@ class PagoController extends Controller
             return $this->error('Solo los aspirantes pueden iniciar un pago en línea.', 403);
         }
 
-        $config = ConfiguracionPago::orderByDesc('id_configuracion')->first();
+        $configId = $request->input('id_configuracion');
+        if ($configId) {
+            $config = ConfiguracionPago::find($configId);
+        } else {
+            $config = ConfiguracionPago::orderByDesc('id_configuracion')->first();
+        }
+
         if (!$config) {
-            return $this->error('No existe configuración de pago activa.', 422);
+            $message = $configId
+                ? 'Configuración de pago no encontrada.'
+                : 'No existe configuración de pago activa.';
+            return $this->error($message, $configId ? 404 : 422);
         }
 
         $baseAmount = (float) $config->monto;
@@ -242,6 +251,11 @@ class PagoController extends Controller
             'amount_fee' => $feeAmount,
             'amount_total' => $totalAmount,
             'currency' => strtoupper($currency),
+            'configuracion' => [
+                'id' => $config->id_configuracion,
+                'concepto' => $config->concepto,
+                'monto' => (float) $config->monto,
+            ],
         ], 'Sesión de pago creada');
     }
 

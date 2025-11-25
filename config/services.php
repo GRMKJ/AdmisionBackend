@@ -38,8 +38,8 @@ return [
     'stripe' => [
         'secret' => env('STRIPE_SECRET'),
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
-        'success_url' => env('STRIPE_SUCCESS_URL', env('FRONTEND_URL', 'http://localhost:5173') . '/admision/pagoexamen?status=success'),
-        'cancel_url' => env('STRIPE_CANCEL_URL', env('FRONTEND_URL', 'http://localhost:5173') . '/admision/pagoexamen?status=cancelled'),
+        'success_url' => env('STRIPE_SUCCESS_URL', env('FRONTEND_URL', 'http://localhost:9001') . '/admision/pagoexamen?status=success'),
+        'cancel_url' => env('STRIPE_CANCEL_URL', env('FRONTEND_URL', 'http://localhost:9001') . '/admision/pagoexamen?status=cancelled'),
         'currency' => env('STRIPE_CURRENCY', 'mxn'),
     ],
 
