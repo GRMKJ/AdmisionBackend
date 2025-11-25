@@ -57,6 +57,13 @@ class PagoController extends Controller
     {
         $data = $request->validated();
 
+        if (!array_key_exists('monto_pagado', $data) || $data['monto_pagado'] === null) {
+            $config = !empty($data['id_configuracion']) ? ConfiguracionPago::find($data['id_configuracion']) : null;
+            if ($config) {
+                $data['monto_pagado'] = $config->monto;
+            }
+        }
+
         // Manejar comprobante si viene
         if ($request->hasFile('comprobante')) {
             $dir = 'comprobantes/' . ($data['id_aspirantes']);
@@ -70,6 +77,7 @@ class PagoController extends Controller
 
         $row = Pago::create($data);
         $row->load(['aspirante', 'configuracion']);
+        $this->advanceAspiranteStep($row);
 
         return $this->ok(new PagoResource($row), 'Creado', 201);
     }
@@ -337,6 +345,19 @@ class PagoController extends Controller
             'updated_at' => optional($pago->updated_at)->toIso8601String(),
             'pago' => new PagoResource($pago),
         ];
+    }
+
+    private function advanceAspiranteStep(Pago $pago): void
+    {
+        $aspirante = $pago->aspirante;
+        if (!$aspirante) {
+            return;
+        }
+
+        if (($aspirante->progress_step ?? 1) < 4) {
+            $aspirante->progress_step = 4;
+            $aspirante->save();
+        }
     }
 
     private function stripeMetadataArray($metadata): array

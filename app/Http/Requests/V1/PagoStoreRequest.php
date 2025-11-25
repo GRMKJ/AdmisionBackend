@@ -17,6 +17,7 @@ class PagoStoreRequest extends FormRequest
             'metodo_pago'      => ['nullable','string','max:50'],
             'fecha_pago'       => ['nullable','date'],
             'referencia'       => ['nullable','string','max:120'],
+            'monto_pagado'     => ['nullable','numeric','min:0'],
             // archivo comprobante (opcional al crear)
             'comprobante'      => ['nullable','file','max:5120','mimes:pdf,jpg,jpeg,png'],
         ];
