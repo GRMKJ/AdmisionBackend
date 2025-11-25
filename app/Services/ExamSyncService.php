@@ -12,6 +12,8 @@ use Illuminate\Support\Facades\Schema;
 
 class ExamSyncService
 {
+    public const REJECTED_STEP = 11;
+
     private ?bool $hasResultColumns = null;
 
     public function exportFolios(): array
@@ -181,8 +183,8 @@ class ExamSyncService
                 $shouldNotify = true;
             }
         } else {
-            if (($aspirante->progress_step ?? 1) !== -1) {
-                $aspirante->progress_step = -1;
+            if (($aspirante->progress_step ?? 1) !== self::REJECTED_STEP) {
+                $aspirante->progress_step = self::REJECTED_STEP;
                 $shouldNotify = true;
             }
         }
