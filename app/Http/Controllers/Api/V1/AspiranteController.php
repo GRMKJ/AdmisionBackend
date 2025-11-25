@@ -155,8 +155,7 @@ class AspiranteController extends Controller
         $aspirante->id_carrera = $validated['id_carrera'];
         $aspirante->progress_step = 3;
         $aspirante->save();
-        $aspirante->load('bachillerato');
-        $aspirante->load('carreras');
+        $aspirante->load(['bachillerato', 'carrera']);
 
         return $this->ok(new AspiranteResource($aspirante), 'Datos académicos guardados');
     }
