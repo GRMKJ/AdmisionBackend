@@ -171,6 +171,7 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware(['auth:sanctum', 'ability:role:aspirante'])->group(function () {
         Route::post('/aspirantes/academico', [AspiranteController::class, 'saveAcademicInfo']);
+        Route::post('/aspirantes/folio/ensure', [AspiranteController::class, 'ensureFolio']);
         Route::post('/aspirantes/folio/resend', [AspiranteController::class, 'resendFolio']);
         Route::post('pagos/stripe/session', [PagoController::class, 'createStripeSession'])
             ->name('pagos.stripe.session');

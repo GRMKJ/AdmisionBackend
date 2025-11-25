@@ -8,6 +8,8 @@ use App\Http\Requests\V1\AspiranteUpdateRequest;
 use App\Http\Resources\V1\AspiranteResource;
 use App\Http\Resources\V1\FolioResource;
 use App\Models\Aspirante;
+use App\Models\Pago;
+use App\Services\PaymentSuccessService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -106,6 +108,45 @@ class AspiranteController extends Controller
 
         return response()->json([
             'folio' => $aspirante?->folio_examen ?: false,
+        ]);
+    }
+
+    public function ensureFolio(Request $request, PaymentSuccessService $paymentSuccess): JsonResponse
+    {
+        $aspirante = $request->user();
+
+        if (!$aspirante instanceof Aspirante) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Solo aspirantes pueden solicitar esta validación.',
+            ], 403);
+        }
+
+        $aspirante->refresh();
+
+        $folioBefore = $aspirante->folio_examen;
+        $configId = (int) config('admissions.diagnostic_payment_config_id', 3);
+
+        $pago = Pago::query()
+            ->where('id_aspirantes', $aspirante->id_aspirantes)
+            ->where('id_configuracion', $configId)
+            ->where('estado_validacion', Pago::EST_VALIDADO)
+            ->latest('fecha_pago')
+            ->first();
+
+        if ($pago) {
+            $paymentSuccess->handle($pago);
+            $aspirante->refresh();
+        }
+
+        $folio = $aspirante->folio_examen;
+
+        return response()->json([
+            'success' => true,
+            'has_validated_payment' => (bool) $pago,
+            'generated_now' => empty($folioBefore) && !empty($folio),
+            'folio' => $folio ?: null,
+            'progress_step' => (int) ($aspirante->progress_step ?? 1),
         ]);
     }
 

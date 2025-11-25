@@ -9,6 +9,7 @@ use App\Http\Resources\V1\PagoResource;
 use App\Models\Pago;
 use App\Models\Aspirante;
 use App\Models\ConfiguracionPago;
+use App\Services\PaymentSuccessService;
 use App\Services\StripePaymentService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
@@ -22,6 +23,13 @@ class PagoController extends Controller
     use ApiResponse;
 
     private const STRIPE_FEE_RATE = 0.036;
+
+    private int $diagnosticConfigId;
+
+    public function __construct(private PaymentSuccessService $paymentSuccess)
+    {
+        $this->diagnosticConfigId = (int) config('admissions.diagnostic_payment_config_id', 3);
+    }
 
     public function index(Request $request)
     {
@@ -56,13 +64,19 @@ class PagoController extends Controller
     public function store(PagoStoreRequest $request)
     {
         $data = $request->validated();
+        $data['id_configuracion'] = $this->diagnosticConfigId;
+
+        $config = ConfiguracionPago::find($this->diagnosticConfigId);
+        if (!$config) {
+            return $this->error('No existe configuración de pago activa.', 422);
+        }
 
         if (!array_key_exists('monto_pagado', $data) || $data['monto_pagado'] === null) {
-            $config = !empty($data['id_configuracion']) ? ConfiguracionPago::find($data['id_configuracion']) : null;
-            if ($config) {
-                $data['monto_pagado'] = $config->monto;
-            }
+            $data['monto_pagado'] = $config->monto;
         }
+
+        $data['estado_validacion'] = Pago::EST_VALIDADO;
+        $data['fecha_pago'] = $data['fecha_pago'] ?? now();
 
         // Manejar comprobante si viene
         if ($request->hasFile('comprobante')) {
@@ -77,7 +91,7 @@ class PagoController extends Controller
 
         $row = Pago::create($data);
         $row->load(['aspirante', 'configuracion']);
-        $this->advanceAspiranteStep($row);
+        $this->paymentSuccess->handle($row);
 
         return $this->ok(new PagoResource($row), 'Creado', 201);
     }
@@ -176,18 +190,9 @@ class PagoController extends Controller
             return $this->error('Solo los aspirantes pueden iniciar un pago en línea.', 403);
         }
 
-        $configId = $request->input('id_configuracion');
-        if ($configId) {
-            $config = ConfiguracionPago::find($configId);
-        } else {
-            $config = ConfiguracionPago::find(3);
-        }
-
+        $config = ConfiguracionPago::find($this->diagnosticConfigId);
         if (!$config) {
-            $message = $configId
-                ? 'Configuración de pago no encontrada.'
-                : 'No existe configuración de pago activa.';
-            return $this->error($message, $configId ? 404 : 422);
+            return $this->error('No existe configuración de pago activa.', 422);
         }
 
         $baseAmount = (float) $config->monto;
@@ -339,19 +344,6 @@ class PagoController extends Controller
         ];
     }
 
-    private function advanceAspiranteStep(Pago $pago): void
-    {
-        $aspirante = $pago->aspirante;
-        if (!$aspirante) {
-            return;
-        }
-
-        if (($aspirante->progress_step ?? 1) < 4) {
-            $aspirante->progress_step = 4;
-            $aspirante->save();
-        }
-    }
-
     private function stripeMetadataArray($metadata): array
     {
         if (is_array($metadata)) {
@@ -380,22 +372,33 @@ class PagoController extends Controller
 
         $aspirante = auth()->user();
 
+        $config = ConfiguracionPago::find($this->diagnosticConfigId);
+        if (!$config) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No existe configuración de pago activa.',
+            ], 422);
+        }
+
         // Asociar Aspirante con el bachillerato existente
         $aspirante->id_bachillerato = $request->bachillerato_id;
         $aspirante->id_carrera = $request->carrera_id;
         $aspirante->promedio_general = $request->promedio;
-        $aspirante->progress_step = 3; // Actualizar paso a 3 (pago)
         $aspirante->save();
 
         // Crear Pago
         $pago = Pago::create([
             'id_aspirantes' => $aspirante->id_aspirantes,
-            'id_configuracion' => 1,
+            'id_configuracion' => $this->diagnosticConfigId,
             'tipo_pago' => 'admisión',
             'metodo_pago' => 'deposito',
             'fecha_pago' => now(),
             'referencia' => $request->referencia,
+            'monto_pagado' => $config->monto,
+            'estado_validacion' => Pago::EST_VALIDADO,
         ]);
+
+        $this->paymentSuccess->handle($pago);
 
         return response()->json([
             'message' => 'Registro de pago exitoso',

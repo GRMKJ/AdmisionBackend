@@ -10,7 +10,10 @@ use Stripe\StripeClient;
 
 class StripePaymentService
 {
-    public function __construct(private StripeClient $stripeClient)
+    public function __construct(
+        private StripeClient $stripeClient,
+        private PaymentSuccessService $paymentSuccess,
+    )
     {
     }
 
@@ -70,6 +73,10 @@ class StripePaymentService
 
         $this->syncAspiranteData($pago->id_aspirantes, $metadata, $pago->estado_validacion);
 
+        if ((int) $pago->estado_validacion === Pago::EST_VALIDADO) {
+            $this->paymentSuccess->handle($pago);
+        }
+
         return $pago->fresh(['aspirante', 'configuracion']);
     }
 
@@ -113,11 +120,6 @@ class StripePaymentService
 
         if (!empty($metadata['promedio'])) {
             $aspirante->promedio_general = $metadata['promedio'];
-            $updated = true;
-        }
-
-        if ($estadoValidacion === Pago::EST_VALIDADO && ($aspirante->progress_step ?? 1) < 4) {
-            $aspirante->progress_step = 4;
             $updated = true;
         }
 
