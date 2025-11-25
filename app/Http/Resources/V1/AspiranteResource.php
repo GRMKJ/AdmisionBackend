@@ -22,6 +22,7 @@ class AspiranteResource extends JsonResource
         };
 
         return [
+            'proof' => 'Este es el actualizado',
             'id'             => $this->id_aspirantes,
             'curp'           => $this->curp,
             'nombre'         => $this->nombre,
