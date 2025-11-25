@@ -252,12 +252,12 @@ class AspiranteController extends Controller
             $currentStep = (int) ($aspirante->progress_step ?? 1);
 
             if ($currentStep === -1 && $previousStep !== -1) {
-                $examSync->applyResult($aspirante, 'rechazado');
+                $examSync->applyResult($aspirante, 'rechazado', null, true);
                 return;
             }
 
             if ($currentStep >= 5 && $previousStep < 5) {
-                $examSync->applyResult($aspirante, 'aprobado', $currentStep);
+                $examSync->applyResult($aspirante, 'aprobado', $currentStep, true);
             }
         }
 

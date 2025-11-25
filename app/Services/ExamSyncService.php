@@ -162,11 +162,11 @@ class ExamSyncService
         return null;
     }
 
-    public function applyResult(Aspirante $aspirante, string $status, ?int $step = null): void
+    public function applyResult(Aspirante $aspirante, string $status, ?int $step = null, bool $forceNotification = false): void
     {
         $canStoreMetadata = $this->canStoreResultMetadata();
         $currentStatus = $canStoreMetadata ? $aspirante->resultado_examen : null;
-        $shouldNotify = false;
+        $shouldNotify = $forceNotification;
 
         if ($canStoreMetadata && $status !== $currentStatus) {
             $aspirante->resultado_examen = $status;
