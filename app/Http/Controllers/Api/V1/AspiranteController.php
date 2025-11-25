@@ -184,11 +184,16 @@ class AspiranteController extends Controller
     public function adminUpdateProgress(Request $request, Aspirante $aspirante, ExamSyncService $examSync)
     {
         $validated = $request->validate([
-            'step' => ['required', 'integer', 'min:-1', 'max:7'],
+            'step' => ['required', 'integer', 'min:-1', 'max:' . ExamSyncService::REJECTED_STEP],
         ]);
 
         $previousStep = (int) ($aspirante->progress_step ?? 1);
-        $aspirante->progress_step = $validated['step'];
+        $requestedStep = (int) $validated['step'];
+        $normalizedStep = $requestedStep === -1
+            ? ExamSyncService::REJECTED_STEP
+            : $requestedStep;
+
+        $aspirante->progress_step = $normalizedStep;
         $aspirante->save();
 
         $aspirante->refresh();
@@ -247,18 +252,18 @@ class AspiranteController extends Controller
         ]);
     }
 
-        private function handleManualStepNotification(Aspirante $aspirante, int $previousStep, ExamSyncService $examSync): void
-        {
-            $currentStep = (int) ($aspirante->progress_step ?? 1);
+    private function handleManualStepNotification(Aspirante $aspirante, int $previousStep, ExamSyncService $examSync): void
+    {
+        $currentStep = (int) ($aspirante->progress_step ?? 1);
 
-            if ($currentStep === -1 && $previousStep !== -1) {
-                $examSync->applyResult($aspirante, 'rechazado', null, true);
-                return;
-            }
-
-            if ($currentStep >= 5 && $previousStep < 5) {
-                $examSync->applyResult($aspirante, 'aprobado', $currentStep, true);
-            }
+        if ($currentStep === ExamSyncService::REJECTED_STEP && $previousStep !== ExamSyncService::REJECTED_STEP) {
+            $examSync->applyResult($aspirante, 'rechazado', null, true);
+            return;
         }
+
+        if ($currentStep >= 5 && $previousStep < 5) {
+            $examSync->applyResult($aspirante, 'aprobado', $currentStep, true);
+        }
+    }
 
 }
