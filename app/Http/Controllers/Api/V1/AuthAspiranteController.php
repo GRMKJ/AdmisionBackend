@@ -88,7 +88,6 @@ class AuthAspiranteController extends Controller
             'curp' => ['required', 'string', 'max:18', 'unique:aspirantes,curp'],
             'password' => ['required', Password::min(8)->numbers()->mixedCase()],
             'email' => ['required', 'email', 'max:255'],
-
             'sexo' => ['required', 'in:H,M,X'],
             'fecha_nacimiento' => ['required', 'date'],
             'estado_nacimiento' => ['required', 'string', 'max:3'],
@@ -111,6 +110,7 @@ class AuthAspiranteController extends Controller
             'fecha_nacimiento' => $data['fecha_nacimiento'] ?? null,
             'estado_nacimiento' => $data['estado_nacimiento'] ?? null,
             'email' => $email,
+            'telefono' => $data['telefono'] ?? null,
             'progress_step' => $data['step'] ?? 1,
         ]);
 
