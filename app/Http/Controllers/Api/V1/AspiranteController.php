@@ -9,6 +9,7 @@ use App\Http\Resources\V1\AspiranteResource;
 use App\Http\Resources\V1\FolioResource;
 use App\Models\Aspirante;
 use App\Models\Pago;
+use App\Services\ExamSyncService;
 use App\Services\PaymentSuccessService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
@@ -180,6 +181,23 @@ class AspiranteController extends Controller
         ]);
     }
 
+    public function adminUpdateProgress(Request $request, Aspirante $aspirante, ExamSyncService $examSync)
+    {
+        $validated = $request->validate([
+            'step' => ['required', 'integer', 'min:-1', 'max:7'],
+        ]);
+
+        $previousStep = (int) ($aspirante->progress_step ?? 1);
+        $aspirante->progress_step = $validated['step'];
+        $aspirante->save();
+
+        $aspirante->refresh();
+        $this->handleManualStepNotification($aspirante, $previousStep, $examSync);
+        $aspirante->refresh()->load(['carrera', 'bachillerato', 'documentos.validador', 'pagos.configuracion']);
+
+        return $this->ok(new AspiranteResource($aspirante), 'Paso actualizado');
+    }
+
     public function saveAcademicInfo(Request $request)
     {
         /** @var \App\Models\Aspirante $aspirante */
@@ -228,5 +246,19 @@ class AspiranteController extends Controller
             'message' => 'Folio reenviado a tu correo',
         ]);
     }
+
+        private function handleManualStepNotification(Aspirante $aspirante, int $previousStep, ExamSyncService $examSync): void
+        {
+            $currentStep = (int) ($aspirante->progress_step ?? 1);
+
+            if ($currentStep === -1 && $previousStep !== -1) {
+                $examSync->applyResult($aspirante, 'rechazado');
+                return;
+            }
+
+            if ($currentStep >= 5 && $previousStep < 5) {
+                $examSync->applyResult($aspirante, 'aprobado', $currentStep);
+            }
+        }
 
 }

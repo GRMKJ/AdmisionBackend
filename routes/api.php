@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\{
     AuthUnifiedController,
     AspiranteController,
     AlumnoController,
+    ExamSyncController,
     CarreraController,
     DocumentoController,
     ConfiguracionPagoController,
@@ -143,6 +144,9 @@ Route::prefix('v1')->group(function () {
         Route::post('/pago/{referencia}/validar', [AdminPagoController::class, 'validar']);
         Route::post('/pago/{referencia}/invalidar', [AdminPagoController::class, 'invalidar']); // opcional
         Route::post('/pago/{referencia}/generar-folio', [AdminPagoController::class, 'generarFolio']);
+        Route::post('/aspirantes/{aspirante}/progress', [AspiranteController::class, 'adminUpdateProgress']);
+        Route::post('/examenes/folios/export', [ExamSyncController::class, 'exportFolios']);
+        Route::get('/examenes/resultados/sync', [ExamSyncController::class, 'syncResults']);
     });
 
     Route::middleware(['auth:sanctum'])->post('/fcm/register', function (\Illuminate\Http\Request $r) {
