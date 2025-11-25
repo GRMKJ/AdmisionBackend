@@ -147,7 +147,7 @@ class AspiranteController extends Controller
         $validated = $request->validate([
             'id_bachillerato' => ['required', 'exists:bachilleratos,id_bachillerato'],
             'promedio_general' => ['required', 'numeric', 'min:0', 'max:10'],
-            'id_carrera' => ['required', 'exists:carrera,id_carrera'],
+            'id_carrera' => ['required', 'exists:carreras,id_carreras'],
         ]);
 
         $aspirante->id_bachillerato = $validated['id_bachillerato'];
