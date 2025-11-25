@@ -176,18 +176,10 @@ class PagoController extends Controller
             return $this->error('Solo los aspirantes pueden iniciar un pago en línea.', 403);
         }
 
-        $data = $request->validate([
-            'bachillerato_id' => ['required', 'exists:bachilleratos,id_bachillerato'],
-            'promedio' => ['required', 'numeric', 'min:0', 'max:10'],
-            'carrera_id' => ['required', 'exists:carreras,id_carreras'],
-        ]);
-
         $config = ConfiguracionPago::orderByDesc('id_configuracion')->first();
         if (!$config) {
             return $this->error('No existe configuración de pago activa.', 422);
         }
-
-        $this->applyAcademicSelection($aspirante, $data);
 
         $baseAmount = (float) $config->monto;
         $totalAmount = round($baseAmount * (1 + self::STRIPE_FEE_RATE), 2);
@@ -200,9 +192,6 @@ class PagoController extends Controller
         $metadata = [
             'aspirante_id' => (string) $aspirante->id_aspirantes,
             'configuracion_id' => (string) $config->id_configuracion,
-            'carrera_id' => (string) $data['carrera_id'],
-            'bachillerato_id' => (string) $data['bachillerato_id'],
-            'promedio' => (string) $data['promedio'],
         ];
 
         $payload = [
@@ -309,17 +298,6 @@ class PagoController extends Controller
         $name = pathinfo($original, PATHINFO_FILENAME);
         $ext = strtolower(pathinfo($original, PATHINFO_EXTENSION));
         return Str::slug($name) . '-' . time() . '.' . $ext;
-    }
-
-    private function applyAcademicSelection(Aspirante $aspirante, array $data): void
-    {
-        $aspirante->id_bachillerato = $data['bachillerato_id'];
-        $aspirante->id_carrera = $data['carrera_id'];
-        $aspirante->promedio_general = $data['promedio'];
-        if (($aspirante->progress_step ?? 1) < 3) {
-            $aspirante->progress_step = 3;
-        }
-        $aspirante->save();
     }
 
     private function urlWithSessionPlaceholder(?string $url): string

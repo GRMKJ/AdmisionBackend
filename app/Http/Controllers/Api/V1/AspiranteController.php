@@ -147,13 +147,16 @@ class AspiranteController extends Controller
         $validated = $request->validate([
             'id_bachillerato' => ['required', 'exists:bachilleratos,id_bachillerato'],
             'promedio_general' => ['required', 'numeric', 'min:0', 'max:10'],
+            'id_carrera' => ['required', 'exists:carrera,id_carrera'],
         ]);
 
         $aspirante->id_bachillerato = $validated['id_bachillerato'];
         $aspirante->promedio_general = $validated['promedio_general'];
+        $aspirante->id_carrera = $validated['id_carrera'];
         $aspirante->progress_step = 3;
         $aspirante->save();
         $aspirante->load('bachillerato');
+        $aspirante->load('carrera');
 
         return $this->ok(new AspiranteResource($aspirante), 'Datos académicos guardados');
     }
