@@ -180,7 +180,7 @@ class PagoController extends Controller
         if ($configId) {
             $config = ConfiguracionPago::find($configId);
         } else {
-            $config = ConfiguracionPago::orderByDesc('id_configuracion')->first();
+            $config = ConfiguracionPago::find(3);
         }
 
         if (!$config) {
