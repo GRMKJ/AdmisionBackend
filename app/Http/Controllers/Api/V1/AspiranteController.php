@@ -139,6 +139,25 @@ class AspiranteController extends Controller
         ]);
     }
 
+    public function saveAcademicInfo(Request $request)
+    {
+        /** @var \App\Models\Aspirante $aspirante */
+        $aspirante = $request->user();
+
+        $validated = $request->validate([
+            'id_bachillerato' => ['required', 'exists:bachilleratos,id_bachillerato'],
+            'promedio_general' => ['required', 'numeric', 'min:0', 'max:10'],
+        ]);
+
+        $aspirante->id_bachillerato = $validated['id_bachillerato'];
+        $aspirante->promedio_general = $validated['promedio_general'];
+        $aspirante->progress_step = 3;
+        $aspirante->save();
+        $aspirante->load('bachillerato');
+
+        return $this->ok(new AspiranteResource($aspirante), 'Datos académicos guardados');
+    }
+
     public function resendFolio(Request $request)
     {
         /** @var \App\Models\Aspirante $aspirante */

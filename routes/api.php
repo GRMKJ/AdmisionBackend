@@ -15,7 +15,8 @@ use App\Http\Controllers\Api\V1\{
     DashboardController,
     AdministradorController,
     AdminPagoController,
-    PushTokenController
+    PushTokenController,
+    StripeWebhookController
 };
 
 Route::get('/login', fn() => abort(401, 'No autenticado'))->name('login');
@@ -36,6 +37,8 @@ Route::post('/debug/send', function (Request $r, \Kreait\Firebase\Contract\Messa
     $messaging->send($message);
     return ['ok' => true];
 });
+
+Route::post('/stripe/webhook', StripeWebhookController::class)->name('stripe.webhook');
 
 
 Route::prefix('v1')->group(function () {
@@ -167,7 +170,13 @@ Route::prefix('v1')->group(function () {
     });
 
     Route::middleware(['auth:sanctum', 'ability:role:aspirante'])->group(function () {
+        Route::post('/aspirantes/academico', [AspiranteController::class, 'saveAcademicInfo']);
         Route::post('/aspirantes/folio/resend', [AspiranteController::class, 'resendFolio']);
+        Route::post('pagos/stripe/session', [PagoController::class, 'createStripeSession'])
+            ->name('pagos.stripe.session');
+        Route::get('pagos/stripe/session/{session}', [PagoController::class, 'showStripeSession'])
+            ->where('session', '[-_A-Za-z0-9]+')
+            ->name('pagos.stripe.session.show');
     });
 
     Route::post('/admin/aspirantes/{id}/force-step', function ($id) {

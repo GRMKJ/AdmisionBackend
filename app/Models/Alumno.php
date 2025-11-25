@@ -18,7 +18,7 @@ class Alumno extends Authenticatable
     protected $fillable = [
         'id_aspirantes','fecha_inscripcion','nombre_carrera','matricula',
         'fecha_inicio_clase','fecha_fin_clases','correo_instituto',
-        'numero_seguro_social','estatus','password',
+        'numero_seguro_social','foto','domicilio','estatus','password',
     ];
 
     protected $hidden = ['password'];

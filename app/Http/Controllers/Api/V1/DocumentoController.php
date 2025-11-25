@@ -143,10 +143,7 @@ public function store(Request $request)
         return $this->ok(null, 'Eliminado', 204);
     }
 
-    /**
-     * Endpoint dedicado: subir/reemplazar solo el archivo
-     * POST /v1/documentos/{documento}/archivo
-     */
+
     public function uploadFile(Request $request, Documento $documento)
     {
         $request->validate([
@@ -190,10 +187,6 @@ public function store(Request $request)
     }
 
 
-    /**
-     * Endpoint dedicado: borrar solo el archivo (conservar registro)
-     * DELETE /v1/documentos/{documento}/archivo
-     */
     public function deleteFile(Documento $documento)
     {
         if (!$documento->archivo_pat) {
@@ -237,7 +230,7 @@ public function store(Request $request)
         }
 
         $documento->update([
-            'estado_validacion' => $request->integer('estado'), // 1 o 2
+            'estado_validacion' => $request->integer('estado'),
             'observaciones'     => $request->input('observaciones'),
             'fecha_validacion'  => now(),
             'id_validador'      => auth()->id(),
@@ -257,8 +250,6 @@ public function store(Request $request)
     }
     public function history(Request $request, Documento $documento)
     {
-        // Solo administrativos o el dueño del documento (si así lo deseas)
-        // Aquí lo dejo abierto a cualquier autenticado; añade abilities si quieres.
         $q = $documento->revisiones()->with('validador');
 
         // ?per_page=15
