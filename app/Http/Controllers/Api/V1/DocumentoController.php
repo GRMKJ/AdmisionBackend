@@ -379,7 +379,7 @@ public function store(Request $request)
 
     private function inscripcionValidatorUrl(): string
     {
-        return config('services.inscripcion_validator.url', 'http://127.0.0.1:9005');
+        return config('services.inscripcion_validator.url', 'http://127.0.0.1:9005/validate');
     }
 
     private function buildAspiranteName(Aspirante $aspirante): string
