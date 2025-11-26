@@ -646,6 +646,10 @@ public function store(Request $request)
             return $this->evaluateCurpDocument($ocrPayload, $aspirante);
         }
 
+        if ($this->looksLikeCertificateDocument($label)) {
+            return $this->evaluateCertificateDocument($ocrPayload, $aspirante);
+        }
+
         if ($this->looksLikeActaDocument($label)) {
             return $this->evaluateActaDocument($ocrPayload, $aspirante);
         }
@@ -733,6 +737,25 @@ public function store(Request $request)
         ];
     }
 
+    private function evaluateCertificateDocument(array $ocrPayload, Aspirante $aspirante): ?array
+    {
+        $nameMatch = $this->ocrContainsAspiranteName($ocrPayload, $aspirante);
+        if (!$nameMatch) {
+            return null;
+        }
+
+        $aspiranteName = $this->buildAspiranteName($aspirante);
+        $observaciones = sprintf(
+            "Nombre detectado en certificado: %s\nEnvío a validación manual.",
+            $aspiranteName
+        );
+
+        return [
+            'estado' => Documento::ESTADO_PENDIENTE_MANUAL,
+            'observaciones' => $observaciones,
+        ];
+    }
+
     private function evaluateAddressDocument(array $ocrPayload): array
     {
         $addresses = array_unique(array_filter(array_map('trim', $ocrPayload['matches']['ADDRESS'] ?? [])));
@@ -769,6 +792,11 @@ public function store(Request $request)
     private function looksLikeActaDocument(string $label): bool
     {
         return Str::contains($label, 'ACTA');
+    }
+
+    private function looksLikeCertificateDocument(string $label): bool
+    {
+        return Str::contains($label, 'CERTIFICADO') || Str::contains($label, 'CONSTANCIA');
     }
 
     private function looksLikeNssDocument(string $label): bool
