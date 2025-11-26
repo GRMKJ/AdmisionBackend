@@ -41,7 +41,16 @@ public function store(Request $request)
         return response()->json(['success' => false, 'message' => 'No autenticado'], 401);
     }
 
-    $path = $request->file('archivo')->store("documentos/{$aspirante->id_aspirantes}", 'public');
+    $file = $request->file('archivo');
+    $ocrAnalysis = $this->analyzeDocumentOcr($file, $documentName, $aspirante);
+    if ($ocrAnalysis && !empty($ocrAnalysis['reject'])) {
+        return response()->json([
+            'success' => false,
+            'message' => $ocrAnalysis['message'] ?? 'El documento no coincide con tus datos, verifica e inténtalo nuevamente.',
+        ], 422);
+    }
+
+    $path = $file->store("documentos/{$aspirante->id_aspirantes}", 'public');
 
     $doc = Documento::updateOrCreate(
         [
@@ -55,7 +64,10 @@ public function store(Request $request)
         ]
     );
 
-    $this->processDocumentOcr($request->file('archivo'), $doc, $aspirante);
+
+    if ($ocrAnalysis) {
+        $this->applyOcrAnalysis($doc, $ocrAnalysis);
+    }
 
     return response()->json([
         'success'   => true,
@@ -101,8 +113,17 @@ public function store(Request $request)
             $resetValidation = true; // <- si quieres que borrar también resetee
         }
 
+        $replacementAnalysis = null;
         // reemplazar archivo si viene uno nuevo
         if ($request->hasFile('archivo')) {
+            $documento->loadMissing('aspirante');
+            $replacementAnalysis = $this->analyzeDocumentOcr($request->file('archivo'), $documento->nombre, $documento->aspirante);
+            if ($replacementAnalysis && !empty($replacementAnalysis['reject'])) {
+                return response()->json([
+                    'success' => false,
+                    'message' => $replacementAnalysis['message'] ?? 'El documento no coincide con los datos registrados.',
+                ], 422);
+            }
             // borra el anterior si existía
             if ($documento->archivo_pat) {
                 Storage::disk('public')->delete($documento->archivo_pat);
@@ -140,6 +161,10 @@ public function store(Request $request)
 
         $documento->load(['aspirante','validador']);
 
+        if ($replacementAnalysis) {
+            $this->applyOcrAnalysis($documento, $replacementAnalysis);
+        }
+
         return $this->ok(new DocumentoResource($documento), 'Actualizado');
     }
 
@@ -159,6 +184,15 @@ public function store(Request $request)
         $request->validate([
             'archivo' => $this->buildUploadRules($documento->nombre),
         ]);
+
+        $documento->loadMissing('aspirante');
+        $analysis = $this->analyzeDocumentOcr($request->file('archivo'), $documento->nombre, $documento->aspirante);
+        if ($analysis && !empty($analysis['reject'])) {
+            return response()->json([
+                'success' => false,
+                'message' => $analysis['message'] ?? 'El documento no coincide con los datos registrados.',
+            ], 422);
+        }
 
         // borra anterior si había
         if ($documento->archivo_pat) {
@@ -193,8 +227,9 @@ public function store(Request $request)
 
         $documento->load(['aspirante','validador']);
 
-        $documento->loadMissing('aspirante');
-        $this->processDocumentOcr($request->file('archivo'), $documento, $documento->aspirante);
+        if ($analysis) {
+            $this->applyOcrAnalysis($documento, $analysis);
+        }
 
         return $this->ok(new DocumentoResource($documento), 'Archivo subido');
     }
@@ -536,30 +571,39 @@ public function store(Request $request)
         return array_values(array_filter(array_unique(explode(' ', $normalized))));
     }
 
-    private function processDocumentOcr(?UploadedFile $file, Documento $documento, ?Aspirante $aspirante): void
+    private function analyzeDocumentOcr(?UploadedFile $file, ?string $documentName, ?Aspirante $aspirante): ?array
     {
         if (!$file || !$aspirante) {
-            return;
+            return null;
         }
 
         $ocrPayload = $this->callOcrService($file);
         if (!$ocrPayload) {
-            return;
+            return null;
         }
 
-        $analysis = $this->evaluateOcrResult($documento->nombre, $ocrPayload, $aspirante);
+        $analysis = $this->evaluateOcrResult($documentName, $ocrPayload, $aspirante);
         if (!$analysis) {
+            return null;
+        }
+
+        return $analysis;
+    }
+
+    private function applyOcrAnalysis(Documento $documento, array $analysis): void
+    {
+        if (!array_key_exists('estado', $analysis) && empty($analysis['observaciones'])) {
             return;
         }
 
-        $estado = $analysis['estado'];
-        $observaciones = trim($analysis['observaciones']);
+        $estado = $analysis['estado'] ?? $documento->estado_validacion;
+        $observaciones = trim((string) ($analysis['observaciones'] ?? ''));
 
         $documento->forceFill([
             'estado_validacion' => $estado,
-            'observaciones' => $observaciones,
-            'fecha_validacion' => $estado === Documento::ESTADO_VALIDADO_AUTOMATICO ? now() : null,
-            'id_validador' => null,
+            'observaciones' => $observaciones ?: $documento->observaciones,
+            'fecha_validacion' => $estado === Documento::ESTADO_VALIDADO_AUTOMATICO ? now() : $documento->fecha_validacion,
+            'id_validador' => $estado === Documento::ESTADO_VALIDADO_AUTOMATICO ? null : $documento->id_validador,
         ])->save();
 
         DocumentoRevision::create([
@@ -623,6 +667,13 @@ public function store(Request $request)
         $ocrCurps = $this->normalizeCollection($ocrPayload['matches']['CURP'] ?? []);
         $curpMatch = $curp && in_array($curp, $ocrCurps, true);
         $nameMatch = $this->ocrContainsAspiranteName($ocrPayload, $aspirante);
+
+        if (!$curpMatch) {
+            return [
+                'reject' => true,
+                'message' => 'El CURP del documento no coincide con el registrado. Verifica tu archivo e intenta nuevamente.',
+            ];
+        }
 
         $estado = ($curpMatch && $nameMatch)
             ? Documento::ESTADO_VALIDADO_AUTOMATICO
