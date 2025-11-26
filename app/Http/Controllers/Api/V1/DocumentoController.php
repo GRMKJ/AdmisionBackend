@@ -724,8 +724,8 @@ public function store(Request $request)
     {
         $nssList = array_unique(array_filter(array_map('trim', $ocrPayload['matches']['NSS'] ?? [])));
         $observaciones = $nssList
-            ? 'NSS detectados: '.implode(', ', $nssList)
-            : 'No se detectaron NSS en el OCR.';
+            ? 'NSS: '.implode(', ', $nssList)
+            : 'No se detectó NSS en el OCR.';
 
         return [
             'estado' => Documento::ESTADO_PENDIENTE_MANUAL,
@@ -736,9 +736,24 @@ public function store(Request $request)
     private function evaluateAddressDocument(array $ocrPayload): array
     {
         $addresses = array_unique(array_filter(array_map('trim', $ocrPayload['matches']['ADDRESS'] ?? [])));
-        $observaciones = $addresses
+        $text = $this->normalizeValue($ocrPayload['text'] ?? '');
+        $hasTotalKeyword = Str::contains($text, 'TOTAL') || Str::contains($text, 'IMPORTE');
+        $serviceKeywords = ['GAS', 'TELEFONO', 'INTERNET', 'LUZ', 'AGUA'];
+        $hasServiceKeyword = false;
+        foreach ($serviceKeywords as $keyword) {
+            if (Str::contains($text, $keyword)) {
+                $hasServiceKeyword = true;
+                break;
+            }
+        }
+
+        $parts = [];
+        $parts[] = $addresses
             ? "Direcciones detectadas:\n- ".implode("\n- ", $addresses)
             : 'No se detectaron domicilios en el OCR.';
+        $parts[] = 'Total/Importe detectado: '.($hasTotalKeyword ? 'sí' : 'no');
+        $parts[] = 'Servicio detectado (gas/teléfono/internet/luz/agua): '.($hasServiceKeyword ? 'sí' : 'no');
+        $observaciones = implode("\n", $parts);
 
         return [
             'estado' => Documento::ESTADO_PENDIENTE_MANUAL,
