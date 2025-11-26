@@ -10,6 +10,7 @@ use App\Models\Documento;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use App\Http\Requests\V1\DocumentoReviewRequest;
 use Illuminate\Support\Facades\Auth;
@@ -20,6 +21,9 @@ use App\Models\Aspirante;
 class DocumentoController extends Controller
 {
     use ApiResponse;
+
+    private const INSCRIPCION_DOC_NAME = 'Pago de Inscripción y Orden de Cobro';
+    private const INSCRIPCION_EXPECTED_CONCEPT = 'CUOTA DE INSCRIPCION O REINSCRIPCION POR CUATRIMESTRE UNIV. TEC. HUEJOTZINGO';
 
 public function store(Request $request)
 {
@@ -265,5 +269,154 @@ public function store(Request $request)
             ],
             'data' => DocumentoRevisionResource::collection($p->items()),
         ]);
+    }
+
+    public function validateInscripcionReference(Request $request)
+    {
+        $data = $request->validate([
+            'reference' => ['required', 'string', 'min:6', 'max:64'],
+        ]);
+
+        $aspirante = $request->user();
+
+        if (!$aspirante instanceof Aspirante) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No se pudo identificar al aspirante autenticado.',
+            ]);
+        }
+
+        try {
+            $response = Http::timeout(10)
+                ->acceptJson()
+                ->post($this->inscripcionValidatorUrl(), [
+                    'reference' => $data['reference'],
+                ]);
+        } catch (\Throwable $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No se pudo contactar al servicio de validación. Intenta nuevamente en unos minutos.',
+            ]);
+        }
+
+        if (!$response->ok()) {
+            return response()->json([
+                'success' => false,
+                'message' => 'El servicio de validación no respondió correctamente. Vuelve a intentarlo más tarde.',
+            ]);
+        }
+
+        $payload = $response->json();
+        $validated = (bool)($payload['validated'] ?? false);
+
+        if (!$validated) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Tu referencia aún no ha sido validada. La volveremos a consultar en las próximas horas y recibirás un correo cuando cambie el estado. También puedes intentarlo nuevamente desde esta pantalla.',
+            ]);
+        }
+
+        $returnedName = $payload['name'] ?? '';
+        $concept = $payload['concept'] ?? '';
+
+        $aspiranteName = $this->buildAspiranteName($aspirante);
+        $nameMatches = $this->normalizeValue($returnedName) === $this->normalizeValue($aspiranteName);
+
+        if (!$nameMatches) {
+            return response()->json([
+                'success' => false,
+                'message' => 'La referencia pertenece a un nombre diferente al registrado. Verifica que capturaste la referencia correcta.',
+            ]);
+        }
+
+        if (!$this->conceptLooksValid($concept)) {
+            return response()->json([
+                'success' => false,
+                'message' => 'El concepto del pago no coincide con la cuota de inscripción esperada. Revisa tu comprobante e intenta más tarde.',
+            ]);
+        }
+
+        $documento = Documento::firstOrCreate(
+            [
+                'id_aspirantes' => $aspirante->id_aspirantes,
+                'nombre' => self::INSCRIPCION_DOC_NAME,
+            ],
+            [
+                'fecha_registro' => now(),
+                'estado_validacion' => 0,
+            ]
+        );
+
+        $observaciones = sprintf(
+            "Nombre validado: %s\nConcepto: %s",
+            $returnedName ?: 'SIN NOMBRE',
+            $concept ?: 'SIN CONCEPTO'
+        );
+
+        $documento->forceFill([
+            'estado_validacion' => 2,
+            'observaciones' => $observaciones,
+            'fecha_validacion' => now(),
+            'id_validador' => null,
+        ])->save();
+
+        DocumentoRevision::create([
+            'id_documentos' => $documento->id_documentos,
+            'id_validador' => null,
+            'estado' => 2,
+            'observaciones' => 'Validación automática por referencia. ' . $observaciones,
+            'fecha_evento' => now(),
+        ]);
+
+        $documento->load(['aspirante', 'validador']);
+
+        return response()->json([
+            'success' => true,
+            'message' => 'Referencia validada correctamente. Guardamos la evidencia en tu expediente.',
+            'documento' => new DocumentoResource($documento),
+        ]);
+    }
+
+    private function inscripcionValidatorUrl(): string
+    {
+        return config('services.inscripcion_validator.url', 'http://127.0.0.1:9005');
+    }
+
+    private function buildAspiranteName(Aspirante $aspirante): string
+    {
+        return collect([
+            $aspirante->nombre,
+            $aspirante->ap_paterno,
+            $aspirante->ap_materno,
+        ])->filter(fn ($value) => filled($value))->implode(' ');
+    }
+
+    private function normalizeValue(?string $value): string
+    {
+        if (!$value) {
+            return '';
+        }
+
+        return Str::of($value)
+            ->ascii()
+            ->upper()
+            ->replaceMatches('/[^A-Z0-9 ]/', ' ')
+            ->squish()
+            ->value();
+    }
+
+    private function conceptLooksValid(?string $concept): bool
+    {
+        if (!$concept) {
+            return false;
+        }
+
+        $normalized = $this->normalizeValue($concept);
+        $expected = $this->normalizeValue(self::INSCRIPCION_EXPECTED_CONCEPT);
+
+        return !empty($normalized)
+            && Str::contains($normalized, 'CUOTA DE INSCRIPCION')
+            && Str::contains($normalized, 'HUEJOTZINGO')
+            && Str::contains($normalized, 'REINSCRIPCION');
     }
 }

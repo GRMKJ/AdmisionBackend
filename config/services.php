@@ -43,4 +43,8 @@ return [
         'currency' => env('STRIPE_CURRENCY', 'mxn'),
     ],
 
+    'inscripcion_validator' => [
+        'url' => env('INSCRIPCION_VALIDATOR_URL', 'http://127.0.0.1:9005'),
+    ],
+
 ];

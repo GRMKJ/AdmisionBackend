@@ -182,6 +182,7 @@ Route::prefix('v1')->group(function () {
         Route::get('pagos/stripe/session/{session}', [PagoController::class, 'showStripeSession'])
             ->where('session', '[-_A-Za-z0-9]+')
             ->name('pagos.stripe.session.show');
+        Route::post('pagos/inscripcion/verify', [DocumentoController::class, 'validateInscripcionReference']);
     });
 
     Route::post('/admin/aspirantes/{id}/force-step', function ($id) {
