@@ -25,10 +25,12 @@ class PagoController extends Controller
     private const STRIPE_FEE_RATE = 0.036;
 
     private int $diagnosticConfigId;
+    private int $seguroConfigId;
 
     public function __construct(private PaymentSuccessService $paymentSuccess)
     {
         $this->diagnosticConfigId = (int) config('admissions.diagnostic_payment_config_id', 3);
+        $this->seguroConfigId = (int) config('admissions.seguro_payment_config_id', 4);
     }
 
     public function index(Request $request)
@@ -190,7 +192,12 @@ class PagoController extends Controller
             return $this->error('Solo los aspirantes pueden iniciar un pago en línea.', 403);
         }
 
-        $config = ConfiguracionPago::find($this->diagnosticConfigId);
+        $request->validate([
+            'id_configuracion' => ['nullable', 'integer', 'exists:configuracion_pagos,id_configuracion'],
+        ]);
+
+        $configId = $request->integer('id_configuracion') ?: $this->diagnosticConfigId;
+        $config = ConfiguracionPago::find($configId);
         if (!$config) {
             return $this->error('No existe configuración de pago activa.', 422);
         }
@@ -200,8 +207,12 @@ class PagoController extends Controller
         $feeAmount = round($totalAmount - $baseAmount, 2);
         $currency = strtolower(config('services.stripe.currency', 'mxn'));
 
-        $successUrl = $this->urlWithSessionPlaceholder(config('services.stripe.success_url'));
-        $cancelUrl = $this->urlWithSessionPlaceholder(config('services.stripe.cancel_url'));
+        $successUrl = $this->urlWithSessionPlaceholder(
+            $this->resolveStripeSuccessUrl($configId)
+        );
+        $cancelUrl = $this->urlWithSessionPlaceholder(
+            $this->resolveStripeCancelUrl($configId)
+        );
 
         $metadata = [
             'aspirante_id' => (string) $aspirante->id_aspirantes,
@@ -359,6 +370,24 @@ class PagoController extends Controller
         }
 
         return [];
+    }
+
+    private function resolveStripeSuccessUrl(int $configId): string
+    {
+        if ($configId === $this->seguroConfigId) {
+            return config('services.stripe.documents_success_url', config('services.stripe.success_url'));
+        }
+
+        return config('services.stripe.success_url');
+    }
+
+    private function resolveStripeCancelUrl(int $configId): string
+    {
+        if ($configId === $this->seguroConfigId) {
+            return config('services.stripe.documents_cancel_url', config('services.stripe.cancel_url'));
+        }
+
+        return config('services.stripe.cancel_url');
     }
 
     public function storeAspirantePago(Request $request)

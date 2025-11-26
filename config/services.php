@@ -41,6 +41,8 @@ return [
         'success_url' => env('STRIPE_SUCCESS_URL', env('FRONTEND_URL', 'http://localhost:9001') . '/admision/pagoexamen?status=success'),
         'cancel_url' => env('STRIPE_CANCEL_URL', env('FRONTEND_URL', 'http://localhost:9001') . '/admision/pagoexamen?status=cancelled'),
         'currency' => env('STRIPE_CURRENCY', 'mxn'),
+        'documents_success_url' => env('STRIPE_DOCS_SUCCESS_URL', env('FRONTEND_URL', 'http://localhost:9001') . '/admision/documentos/subida?status=success'),
+        'documents_cancel_url' => env('STRIPE_DOCS_CANCEL_URL', env('FRONTEND_URL', 'http://localhost:9001') . '/admision/documentos/subida?status=cancelled'),
     ],
 
     'inscripcion_validator' => [
