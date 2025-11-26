@@ -320,9 +320,7 @@ public function store(Request $request)
         $concept = $payload['concept'] ?? '';
 
         $aspiranteName = $this->buildAspiranteName($aspirante);
-        $nameMatches = $this->normalizeValue($returnedName) === $this->normalizeValue($aspiranteName);
-
-        if (!$nameMatches) {
+        if (!$this->namesRoughlyMatch($aspiranteName, $returnedName)) {
             return response()->json([
                 'success' => false,
                 'message' => 'La referencia pertenece a un nombre diferente al registrado. Verifica que capturaste la referencia correcta.',
@@ -412,11 +410,45 @@ public function store(Request $request)
         }
 
         $normalized = $this->normalizeValue($concept);
-        $expected = $this->normalizeValue(self::INSCRIPCION_EXPECTED_CONCEPT);
 
         return !empty($normalized)
             && Str::contains($normalized, 'CUOTA DE INSCRIPCION')
             && Str::contains($normalized, 'HUEJOTZINGO')
             && Str::contains($normalized, 'REINSCRIPCION');
+    }
+
+    private function namesRoughlyMatch(string $aspiranteName, ?string $returnedName): bool
+    {
+        if (!$returnedName) {
+            return false;
+        }
+
+        $aspTokens = $this->tokenizeName($aspiranteName);
+        $returnedTokens = $this->tokenizeName($returnedName);
+
+        if (empty($aspTokens) || empty($returnedTokens)) {
+            return false;
+        }
+
+        $matches = 0;
+        foreach ($aspTokens as $token) {
+            if (in_array($token, $returnedTokens, true)) {
+                $matches++;
+            }
+        }
+
+        $requiredMatches = min(3, count($aspTokens));
+
+        return $matches >= $requiredMatches;
+    }
+
+    private function tokenizeName(?string $value): array
+    {
+        $normalized = $this->normalizeValue($value);
+        if (empty($normalized)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_unique(explode(' ', $normalized))));
     }
 }
