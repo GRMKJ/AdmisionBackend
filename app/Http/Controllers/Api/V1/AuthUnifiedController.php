@@ -10,9 +10,12 @@ use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use Carbon\Carbon;
 use App\Mail\AspirantePasswordResetMail;
 use App\Mail\GenericResetInstructionsMail;
+use App\Mail\PasswordResetLinkMail;
 
 class AuthUnifiedController extends Controller
 {
@@ -91,6 +94,50 @@ class AuthUnifiedController extends Controller
     }
 
     /**
+     * POST /api/v1/auth/reset
+     * Restablece la contraseña dado email + token + nueva contraseña.
+     */
+    public function reset(Request $request)
+    {
+        $data = $request->validate([
+            'email'                 => ['required', 'email', 'max:190'],
+            'token'                 => ['required', 'string'],
+            'password'              => ['required', 'string', 'min:8', 'max:190', 'confirmed'],
+            'password_confirmation' => ['required', 'string', 'max:190'],
+            'role'                  => ['required', 'in:aspirante,alumno,administrativo'],
+        ]);
+
+        $record = DB::table('password_reset_tokens')
+            ->where('email', $data['email'])
+            ->first();
+
+        if (!$record || empty($record->token) || !Hash::check($data['token'], $record->token)) {
+            return $this->error('Token inválido o ya utilizado.', 422);
+        }
+
+        $expiresInMinutes = (int) config('auth.passwords.users.expire', 60);
+        if (!empty($record->created_at)) {
+            $created = Carbon::parse($record->created_at);
+            if ($created->addMinutes($expiresInMinutes)->isPast()) {
+                DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
+                return $this->error('El link de restablecimiento ha expirado.', 422);
+            }
+        }
+
+        $user = $this->findResettableUser($data['role'], $data['email']);
+        if (!$user) {
+            return $this->error('No se encontró una cuenta para este correo.', 404);
+        }
+
+        $user->password = Hash::make($data['password']);
+        $user->save();
+
+        DB::table('password_reset_tokens')->where('email', $data['email'])->delete();
+
+        return $this->ok(null, 'Contraseña actualizada correctamente.');
+    }
+
+    /**
      * POST /api/v1/auth/forgot
      * Autodetecta el tipo de usuario a partir de "identity" y, por defecto,
      * envía correo con instrucciones. Para Aspirante, genera una contraseña
@@ -103,48 +150,73 @@ class AuthUnifiedController extends Controller
             'identity' => ['required','string','max:190'],
         ]);
 
-        $identity = trim($request->string('identity'));
+        $identity = trim((string) $request->input('identity'));
+        $normalizedIdentity = strtoupper($identity);
+
+        \Log::debug('Forgot password request', [
+            'raw_identity'        => $identity,
+            'normalized_identity' => $normalizedIdentity,
+        ]);
 
         // Orden preferente: aspirante -> alumno -> administrativo
         $aspirante = $this->findAspirante($identity);
         if ($aspirante && !empty($aspirante->email)) {
             try {
-                $newPass = Str::random(10);
-                $aspirante->password = Hash::make($newPass);
-                $aspirante->save();
-
-                Mail::to($aspirante->email)->send(new AspirantePasswordResetMail(
-                    nombre: trim(($aspirante->nombre ?? '').' '.($aspirante->ap_paterno ?? '')),
-                    curp: $aspirante->curp,
-                    nuevaContrasena: $newPass,
-                ));
+                $this->sendResetLinkEmail(
+                    email: $aspirante->email,
+                    name: trim(($aspirante->nombre ?? '').' '.($aspirante->ap_paterno ?? '')),
+                    role: 'aspirante'
+                );
             } catch (\Throwable $e) {
-                // Log opcional
-                \Log::error('No se pudo enviar reset de aspirante: '.$e->getMessage());
+                return $this->error('No se pudo enviar el correo de restablecimiento. Intenta más tarde.', 500);
             }
-
-            return $this->ok(null, 'Si la cuenta existe, hemos enviado instrucciones al correo.');
+            return $this->ok(null, 'Si la cuenta existe, hemos enviado un link de restablecimiento.');
         }
 
         $alumno = $this->findAlumno($identity);
         if ($alumno && !empty($alumno->correo_instituto)) {
             try {
-                Mail::to($alumno->correo_instituto)->send(new GenericResetInstructionsMail(
-                    nombre: $alumno->matricula ?? 'Alumno',
-                    rol: 'alumno',
-                ));
+                $this->sendResetLinkEmail(
+                    email: $alumno->correo_instituto,
+                    name: $alumno->matricula ?? 'Alumno',
+                    role: 'alumno'
+                );
             } catch (\Throwable $e) {
-                \Log::error('No se pudo enviar instrucciones a alumno: '.$e->getMessage());
+                return $this->error('No se pudo enviar el correo de restablecimiento. Intenta más tarde.', 500);
             }
-
-            return $this->ok(null, 'Si la cuenta existe, hemos enviado instrucciones al correo.');
+            return $this->ok(null, 'Si la cuenta existe, hemos enviado un link de restablecimiento.');
         }
 
         $admin = $this->findAdministrativo($identity);
         if ($admin) {
-            // El modelo de Administrativo actual no tiene email; puedes ampliarlo y enviar correo aquí.
-            // Por ahora, devolvemos respuesta genérica.
-            return $this->ok(null, 'Si la cuenta existe, hemos enviado instrucciones al correo.');
+            \Log::debug('Administrativo encontrado', [
+                'identity'        => $identity,
+                'numero_empleado' => $admin->numero_empleado,
+                'email'           => $admin->email,
+            ]);
+        } else {
+            \Log::debug('Administrativo no localizado', [
+                'identity' => $identity,
+            ]);
+        }
+        if ($admin) {
+            if (!empty($admin->email)) {
+                try {
+                    $this->sendResetLinkEmail(
+                        email: $admin->email,
+                        name: trim(($admin->nombre ?? '').' '.($admin->ap_paterno ?? '')) ?: ($admin->numero_empleado ?? 'Administrativo'),
+                        role: 'administrativo'
+                    );
+                } catch (\Throwable $e) {
+                    return $this->error('No se pudo enviar el correo de restablecimiento. Intenta más tarde.', 500);
+                }
+            } else {
+                \Log::warning('Administrativo sin email registrado para reset', [
+                    'numero_empleado' => $admin->numero_empleado,
+                ]);
+                return $this->error('No hay un correo registrado para este administrativo. Contacta a sistemas.', 422);
+            }
+            return $this->ok(null, 'Si la cuenta existe, hemos enviado un link de restablecimiento.');
         }
 
         // Respuesta genérica siempre, sin revelar existencia
@@ -155,13 +227,25 @@ class AuthUnifiedController extends Controller
 
     private function inferTipo(string $identity): string
     {
-        // CURP: 18 caracteres alfanuméricos con patrón típico
+        // 1) CURP: 18 caracteres alfanuméricos con patrón típico -> aspirante
         $curpRegex = '/^[A-Z]{4}\d{6}[HM][A-Z]{5}\d{2}$/i';
         if (strlen($identity) === 18 && preg_match($curpRegex, strtoupper($identity))) {
             return 'aspirante';
         }
 
-        // Heurística simple: intenta buscar en los tres
+        // 2) Administrativo por formato: username que empieza con 'ADM' (case-insensitive)
+        if (preg_match('/^ADM/i', $identity)) {
+            return 'administrativo';
+        }
+
+        // 3) Alumno por matrícula: ejemplo '2025XXXXXX' -> matrícula de 10 dígitos empezando con '20'
+        //    Detectamos matrículas de 10 dígitos que comienzan con '20' (2000-2099)
+        if (preg_match('/^20\d{8}$/', $identity)) {
+            return 'alumno';
+        }
+
+        // 4) Si ningún patrón coincide, intentamos una heurística basada en la existencia en la BD
+        //    (fallback: intenta buscar en los tres modelos - primera coincidencia)
         if ($this->findAlumno($identity))         return 'alumno';
         if ($this->findAdministrativo($identity)) return 'administrativo';
         if ($this->findAspirante($identity))      return 'aspirante';
@@ -186,7 +270,23 @@ class AuthUnifiedController extends Controller
 
     private function findAdministrativo(string $numeroEmpleado): ?Administrativo
     {
-        return Administrativo::where('numero_empleado', $numeroEmpleado)->first();
+        // Intentamos varias formas para soportar identidades con/ sin prefijo 'ADM'
+        // 1) Coincidencia exacta
+        $admin = Administrativo::where('numero_empleado', $numeroEmpleado)->first();
+        if ($admin) return $admin;
+
+        // 2) Si viene con prefijo 'ADM', quitamos el prefijo y buscamos
+        if (preg_match('/^ADM/i', $numeroEmpleado)) {
+            $stripped = preg_replace('/^ADM/i', '', $numeroEmpleado);
+            if ($stripped !== '') {
+                $admin = Administrativo::where('numero_empleado', $stripped)->first();
+                if ($admin) return $admin;
+            }
+        }
+
+        // 3) Si no tiene prefijo, probamos con 'ADM' delante (por si en la BD se guarda con prefijo)
+        $withPrefix = 'ADM' . $numeroEmpleado;
+        return Administrativo::where('numero_empleado', $withPrefix)->first();
     }
 
     private function resolveRoleFromToken($user): string
@@ -244,5 +344,56 @@ class AuthUnifiedController extends Controller
         $digits = preg_replace('/\D+/', '', $phone);
         $last4 = substr($digits, -4);
         return '***' . $last4;
+    }
+
+    private function findResettableUser(string $role, string $email)
+    {
+        return match ($role) {
+            'aspirante'      => Aspirante::where('email', $email)->first(),
+            'alumno'         => Alumno::where('correo_instituto', $email)->first(),
+            'administrativo' => Administrativo::where('email', $email)->first(),
+            default          => null,
+        };
+    }
+
+    /**
+     * Genera y envía un link de restablecimiento de contraseña al correo indicado.
+     * Usa la tabla password_reset_tokens estándar de Laravel (email, token hash, created_at).
+     */
+    private function sendResetLinkEmail(string $email, string $name, string $role): void
+    {
+        try {
+            $plainToken = Str::random(64);
+            // Guardamos token hasheado por seguridad
+            DB::table('password_reset_tokens')->updateOrInsert(
+                ['email' => $email],
+                ['token' => Hash::make($plainToken), 'created_at' => now()]
+            );
+
+            $front = rtrim(config('app.front_url', config('app.url')), '/');
+            $path  = config('app.password_reset_path', '/restablecer');
+            $resetUrl = $front.$path.'?token='.urlencode($plainToken).'&email='.urlencode($email).'&role='.urlencode($role);
+
+            Mail::to($email)->send(new PasswordResetLinkMail(
+                nombre: $name,
+                rol: $role,
+                url: $resetUrl,
+            ));
+
+            if (method_exists(Mail::class, 'failures') && !empty(Mail::failures())) {
+                throw new \RuntimeException('El servidor SMTP devolvió fallas: '.implode(', ', Mail::failures()));
+            }
+
+            \Log::info('Link de restablecimiento enviado', [
+                'email' => $email,
+                'role'  => $role,
+            ]);
+        } catch (\Throwable $e) {
+            \Log::error('No se pudo generar/enviar link de restablecimiento: '.$e->getMessage(), [
+                'email' => $email,
+                'role'  => $role,
+            ]);
+            throw $e;
+        }
     }
 }

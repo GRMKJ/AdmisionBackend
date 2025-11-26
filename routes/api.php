@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\V1\{
     AuthUnifiedController,
     AspiranteController,
     AlumnoController,
+    ExamSyncController,
     CarreraController,
     DocumentoController,
     ConfiguracionPagoController,
@@ -15,10 +16,19 @@ use App\Http\Controllers\Api\V1\{
     DashboardController,
     AdministradorController,
     AdminPagoController,
-    PushTokenController
+    PushTokenController,
+    StripeWebhookController
 };
 
 Route::get('/login', fn() => abort(401, 'No autenticado'))->name('login');
+
+Route::get('/health', function () {
+    return response()->json([
+        'ok' => true,
+        'message' => 'API operativa',
+        'timestamp' => now()->toIso8601String(),
+    ]);
+})->name('health');
 
 Route::post('/debug/send', function (Request $r, \Kreait\Firebase\Contract\Messaging $messaging) {
     $token = $r->input('token');
@@ -29,6 +39,8 @@ Route::post('/debug/send', function (Request $r, \Kreait\Firebase\Contract\Messa
     return ['ok' => true];
 });
 
+Route::post('/stripe/webhook', StripeWebhookController::class)->name('stripe.webhook');
+
 
 Route::prefix('v1')->group(function () {
 
@@ -37,6 +49,7 @@ Route::prefix('v1')->group(function () {
     Route::post('auth/login', [AuthUnifiedController::class, 'login']);
     // Recuperación de acceso (autodetección de tipo y opciones)
     Route::post('auth/forgot', [AuthUnifiedController::class, 'forgot']);
+    Route::post('auth/reset', [AuthUnifiedController::class, 'reset']);
 
     // Rutas protegidas por token Sanctum
     Route::middleware('auth:sanctum')->group(function () {
@@ -82,6 +95,10 @@ Route::prefix('v1')->group(function () {
         Route::get('documentos/{documento}/historial', [DocumentoController::class, 'history'])
             ->middleware('ability:role:alumno,role:aspirante,role:administrativo')
             ->name('documentos.history');
+
+        Route::get('documentos/{documento}/archivo/base64', [DocumentoController::class, 'downloadBase64'])
+            ->middleware('ability:role:alumno,role:aspirante,role:administrativo')
+            ->name('documentos.downloadBase64');
 
         // Revisar documento: SOLO administrativos (además pasa por Policy->review)
         Route::patch('documentos/{documento}/revision', [DocumentoController::class, 'review'])
@@ -131,6 +148,10 @@ Route::prefix('v1')->group(function () {
         Route::post('/pago/{referencia}/validar', [AdminPagoController::class, 'validar']);
         Route::post('/pago/{referencia}/invalidar', [AdminPagoController::class, 'invalidar']); // opcional
         Route::post('/pago/{referencia}/generar-folio', [AdminPagoController::class, 'generarFolio']);
+        Route::post('/aspirantes/{aspirante}/progress', [AspiranteController::class, 'adminUpdateProgress']);
+        Route::post('/examenes/folios/export', [ExamSyncController::class, 'exportFolios']);
+        Route::get('/examenes/resultados/sync', [ExamSyncController::class, 'syncResults']);
+        Route::post('/documentos/{documento}/validar-manual', [DocumentoController::class, 'adminManualValidate']);
     });
 
     Route::middleware(['auth:sanctum'])->post('/fcm/register', function (\Illuminate\Http\Request $r) {
@@ -147,6 +168,7 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware(['auth:sanctum', 'ability:role:aspirante'])->group(function () {
         Route::get('/aspirantes/progress', [AspiranteController::class, 'progress']);
+        Route::post('/aspirantes/finalize-documents', [AspiranteController::class, 'finalizeDocuments']);
     });
     Route::post('/aspirante/progress', [AspiranteController::class, 'updateProgress'])
     ->middleware('auth:sanctum', 'ability:role:aspirante');
@@ -158,7 +180,15 @@ Route::prefix('v1')->group(function () {
     });
 
     Route::middleware(['auth:sanctum', 'ability:role:aspirante'])->group(function () {
+        Route::post('/aspirantes/academico', [AspiranteController::class, 'saveAcademicInfo']);
+        Route::post('/aspirantes/folio/ensure', [AspiranteController::class, 'ensureFolio']);
         Route::post('/aspirantes/folio/resend', [AspiranteController::class, 'resendFolio']);
+        Route::post('pagos/stripe/session', [PagoController::class, 'createStripeSession'])
+            ->name('pagos.stripe.session');
+        Route::get('pagos/stripe/session/{session}', [PagoController::class, 'showStripeSession'])
+            ->where('session', '[-_A-Za-z0-9]+')
+            ->name('pagos.stripe.session.show');
+        Route::post('pagos/inscripcion/verify', [DocumentoController::class, 'validateInscripcionReference']);
     });
 
     Route::post('/admin/aspirantes/{id}/force-step', function ($id) {

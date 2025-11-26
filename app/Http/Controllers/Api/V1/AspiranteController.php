@@ -7,16 +7,28 @@ use App\Http\Requests\V1\AspiranteStoreRequest;
 use App\Http\Requests\V1\AspiranteUpdateRequest;
 use App\Http\Resources\V1\AspiranteResource;
 use App\Http\Resources\V1\FolioResource;
+use App\Mail\DocumentsValidatedMail;
+use App\Models\Alumno;
 use App\Models\Aspirante;
+use App\Models\Documento;
+use App\Models\Pago;
+use App\Services\ExamSyncService;
+use App\Services\PaymentSuccessService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
 use App\Mail\FolioGeneradoMail;
 use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Str;
+use Carbon\Carbon;
 
 class AspiranteController extends Controller
 {
     use ApiResponse;
+    private const ENROLLMENT_YEAR = 2025;
+    private const CLASSES_START_DATE = '2025-09-15';
 
     public function index(Request $request)
     {
@@ -60,10 +72,30 @@ class AspiranteController extends Controller
         return $this->ok(new AspiranteResource($asp), 'Creado', 201);
     }
 
-    public function show(Aspirante $aspirante)
+    public function show($aspirante)
     {
-        $aspirante->load('carrera');
-        return $this->ok(new AspiranteResource($aspirante));
+        $asp = Aspirante::query()
+            ->with([
+                'carrera',
+                'bachillerato',
+                'documentos.validador',
+                'pagos.configuracion',
+            ])
+            ->where(function ($q) use ($aspirante) {
+                $q->where('id_aspirantes', $aspirante)
+                    ->orWhere('folio_examen', $aspirante)
+                    ->orWhere('curp', $aspirante);
+            })
+            ->first();
+
+        if (!$asp) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Aspirante no encontrado',
+            ], 404);
+        }
+
+        return $this->ok(new AspiranteResource($asp));
     }
 
     public function update(AspiranteUpdateRequest $request, Aspirante $aspirante)
@@ -86,6 +118,45 @@ class AspiranteController extends Controller
 
         return response()->json([
             'folio' => $aspirante?->folio_examen ?: false,
+        ]);
+    }
+
+    public function ensureFolio(Request $request, PaymentSuccessService $paymentSuccess): JsonResponse
+    {
+        $aspirante = $request->user();
+
+        if (!$aspirante instanceof Aspirante) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Solo aspirantes pueden solicitar esta validación.',
+            ], 403);
+        }
+
+        $aspirante->refresh();
+
+        $folioBefore = $aspirante->folio_examen;
+        $configId = (int) config('admissions.diagnostic_payment_config_id', 3);
+
+        $pago = Pago::query()
+            ->where('id_aspirantes', $aspirante->id_aspirantes)
+            ->where('id_configuracion', $configId)
+            ->where('estado_validacion', Pago::EST_VALIDADO)
+            ->latest('fecha_pago')
+            ->first();
+
+        if ($pago) {
+            $paymentSuccess->handle($pago);
+            $aspirante->refresh();
+        }
+
+        $folio = $aspirante->folio_examen;
+
+        return response()->json([
+            'success' => true,
+            'has_validated_payment' => (bool) $pago,
+            'generated_now' => empty($folioBefore) && !empty($folio),
+            'folio' => $folio ?: null,
+            'progress_step' => (int) ($aspirante->progress_step ?? 1),
         ]);
     }
 
@@ -119,6 +190,125 @@ class AspiranteController extends Controller
         ]);
     }
 
+    public function finalizeDocuments(Request $request)
+    {
+        /** @var \App\Models\Aspirante $aspirante */
+        $aspirante = $request->user();
+
+        if (!$aspirante instanceof Aspirante) {
+            return $this->error('Solo los aspirantes pueden completar este paso.', 403);
+        }
+
+        $aspirante->loadMissing(['carrera', 'alumno', 'documentos']);
+
+        if ((int) ($aspirante->progress_step ?? 1) < 5) {
+            return $this->error('Aún no puedes completar este paso. Espera la validación de tus documentos.', 422);
+        }
+
+        if ($aspirante->alumno) {
+            if ((int) ($aspirante->progress_step ?? 1) < 6) {
+                $aspirante->progress_step = 6;
+                $aspirante->save();
+            }
+
+            return response()->json([
+                'success' => true,
+                'already_created' => true,
+                'matricula' => $aspirante->alumno->matricula,
+                'correo_institucional' => $aspirante->alumno->correo_instituto,
+            ]);
+        }
+
+        $matricula = $this->generateMatricula($aspirante);
+        $plainPassword = $this->generateAlumnoPassword();
+        $correoInstituto = strtolower($matricula) . '@uth.edu.mx';
+        $nss = $this->extractAspiranteNss($aspirante);
+        $fechaInicioClases = Carbon::createFromFormat('Y-m-d', self::CLASSES_START_DATE)->startOfDay();
+
+        $alumno = DB::transaction(function () use (
+            $aspirante,
+            $matricula,
+            $plainPassword,
+            $correoInstituto,
+            $fechaInicioClases,
+            $nss
+        ) {
+            $alumno = Alumno::create([
+                'id_aspirantes' => $aspirante->id_aspirantes,
+                'fecha_inscripcion' => now(),
+                'nombre_carrera' => optional($aspirante->carrera)->nombre,
+                'matricula' => $matricula,
+                'password' => Hash::make($plainPassword),
+                'fecha_inicio_clase' => $fechaInicioClases,
+                'fecha_fin_clases' => null,
+                'correo_instituto' => $correoInstituto,
+                'numero_seguro_social' => $nss,
+                'estatus' => 1,
+            ]);
+
+            $aspirante->progress_step = max(6, (int) ($aspirante->progress_step ?? 1));
+            $aspirante->save();
+
+            return $alumno;
+        });
+
+        $alumno->loadMissing(['aspirante', 'aspirante.carrera']);
+
+        if (!empty($aspirante->email) && filter_var($aspirante->email, FILTER_VALIDATE_EMAIL)) {
+            Mail::to($aspirante->email)->send(new DocumentsValidatedMail($alumno, $plainPassword));
+        }
+
+        return response()->json([
+            'success' => true,
+            'matricula' => $alumno->matricula,
+            'correo_institucional' => $alumno->correo_instituto,
+            'fecha_inicio_clase' => optional($alumno->fecha_inicio_clase)->toDateString(),
+        ]);
+    }
+
+    public function adminUpdateProgress(Request $request, Aspirante $aspirante, ExamSyncService $examSync)
+    {
+        $validated = $request->validate([
+            'step' => ['required', 'integer', 'min:-1', 'max:' . ExamSyncService::REJECTED_STEP],
+        ]);
+
+        $previousStep = (int) ($aspirante->progress_step ?? 1);
+        $requestedStep = (int) $validated['step'];
+        $normalizedStep = $requestedStep === -1
+            ? ExamSyncService::REJECTED_STEP
+            : $requestedStep;
+
+        $aspirante->progress_step = $normalizedStep;
+        $aspirante->save();
+
+        $aspirante->refresh();
+        $this->handleManualStepNotification($aspirante, $previousStep, $examSync);
+        $aspirante->refresh()->load(['carrera', 'bachillerato', 'documentos.validador', 'pagos.configuracion']);
+
+        return $this->ok(new AspiranteResource($aspirante), 'Paso actualizado');
+    }
+
+    public function saveAcademicInfo(Request $request)
+    {
+        /** @var \App\Models\Aspirante $aspirante */
+        $aspirante = $request->user();
+
+        $validated = $request->validate([
+            'id_bachillerato' => ['required', 'exists:bachilleratos,id_bachillerato'],
+            'promedio_general' => ['required', 'numeric', 'min:0', 'max:10'],
+            'id_carrera' => ['required', 'exists:carreras,id_carreras'],
+        ]);
+
+        $aspirante->id_bachillerato = $validated['id_bachillerato'];
+        $aspirante->promedio_general = $validated['promedio_general'];
+        $aspirante->id_carrera = $validated['id_carrera'];
+        $aspirante->progress_step = 3;
+        $aspirante->save();
+        $aspirante->load(['bachillerato', 'carrera']);
+
+        return $this->ok(new AspiranteResource($aspirante), 'Datos académicos guardados');
+    }
+
     public function resendFolio(Request $request)
     {
         /** @var \App\Models\Aspirante $aspirante */
@@ -145,6 +335,59 @@ class AspiranteController extends Controller
             'success' => true,
             'message' => 'Folio reenviado a tu correo',
         ]);
+    }
+
+    private function generateMatricula(Aspirante $aspirante): string
+    {
+        $sequence = str_pad((string) $aspirante->id_aspirantes, 4, '0', STR_PAD_LEFT);
+        return self::ENROLLMENT_YEAR . $sequence;
+    }
+
+    private function generateAlumnoPassword(): string
+    {
+        return strtoupper(Str::random(10));
+    }
+
+    private function extractAspiranteNss(Aspirante $aspirante): ?string
+    {
+        $document = Documento::query()
+            ->where('id_aspirantes', $aspirante->id_aspirantes)
+            ->where(function ($q) {
+                $q->where('nombre', 'like', '%Seguro Social%')
+                    ->orWhere('nombre', 'like', '%Seguridad Social%')
+                    ->orWhere('nombre', 'like', '%NSS%')
+                    ->orWhere('nombre', 'like', '%IMSS%');
+            })
+            ->latest('updated_at')
+            ->first();
+
+        if (!$document || empty($document->observaciones)) {
+            return null;
+        }
+
+        if (preg_match('/NSS[^0-9]*([0-9]{5,})/i', $document->observaciones, $matches)) {
+            return $matches[1];
+        }
+
+        if (preg_match('/([0-9]{5,})/', $document->observaciones, $matches)) {
+            return $matches[1];
+        }
+
+        return null;
+    }
+
+    private function handleManualStepNotification(Aspirante $aspirante, int $previousStep, ExamSyncService $examSync): void
+    {
+        $currentStep = (int) ($aspirante->progress_step ?? 1);
+
+        if ($currentStep === ExamSyncService::REJECTED_STEP && $previousStep !== ExamSyncService::REJECTED_STEP) {
+            $examSync->applyResult($aspirante, 'rechazado', null, true);
+            return;
+        }
+
+        if ($currentStep >= 5 && $previousStep < 5) {
+            $examSync->applyResult($aspirante, 'aprobado', $currentStep, true);
+        }
     }
 
 }

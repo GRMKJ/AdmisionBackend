@@ -21,14 +21,20 @@ class Pago extends Model
         'id_configuracion',
         'tipo_pago',
         'metodo_pago',
+        'monto_pagado',
+        'stripe_session_id',
+        'stripe_payment_intent',
         'fecha_pago',
         'referencia',
         'estado_validacion',
         'id_admin_validador',
+        'receipt_sent_at',
     ];
 
     protected $casts = [
         'fecha_pago' => 'date',
+        'monto_pagado' => 'decimal:2',
+        'receipt_sent_at' => 'datetime',
     ];
     public const EST_PENDIENTE = 0;
     public const EST_VALIDADO  = 1;

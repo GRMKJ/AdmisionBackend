@@ -38,6 +38,8 @@ class Aspirante extends Authenticatable
         'estatus' => 'integer',
         'pago_validado' => 'boolean',
         'progress_step' => 'integer',
+        'folio_exportado_at' => 'datetime',
+        'resultado_notificado_at' => 'datetime',
     ];
 
     public function carrera()

@@ -11,8 +11,8 @@ class DocumentoReviewRequest extends FormRequest
     public function rules(): array
     {
         return [
-            // 1 = aprobado, 2 = rechazado (0 no tiene sentido en revisión)
-            'estado'        => ['required','integer','in:1,2'],
+            // 1 = pendiente manual, 2 = validación automática / rechazo, 3 = validación manual
+            'estado'        => ['required','integer','in:1,2,3'],
             'observaciones' => ['nullable','string'],
         ];
     }

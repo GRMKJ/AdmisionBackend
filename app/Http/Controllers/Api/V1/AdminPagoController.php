@@ -3,15 +3,14 @@
 namespace App\Http\Controllers\Api\V1;
 
 use App\Http\Controllers\Controller;
-use App\Http\Controllers\V1\BachilleratoController;
-use App\Http\Resources\V1\PagoDetalleResource;
 use App\Models\Aspirante;
 use App\Models\Pago;
-use App\Models\Bachillerato;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use App\Events\FolioGenerado;
+use App\Services\PaymentSuccessService;
+use App\Support\FolioGenerator;
 
 class AdminPagoController extends Controller
 {
@@ -47,7 +46,7 @@ class AdminPagoController extends Controller
     }
 
     /** POST /admin/pago/{referencia}/validar */
-    public function validar(Request $request, string $referencia): JsonResponse
+    public function validar(Request $request, string $referencia, PaymentSuccessService $paymentSuccess): JsonResponse
     {
         $user = $request->user();
         if (!$user)
@@ -62,7 +61,11 @@ class AdminPagoController extends Controller
 
         $pago->estado_validacion = Pago::EST_VALIDADO; // 1
         $pago->id_admin_validador = $user->id_administrativo;
+        if (!$pago->fecha_pago) {
+            $pago->fecha_pago = now();
+        }
         $pago->save();
+        $paymentSuccess->handle($pago);
         return $this->ok(null, 'Pago validado');
     }
 
@@ -100,7 +103,7 @@ class AdminPagoController extends Controller
             return $this->error('Aspirante no encontrado', 404);
 
         if (empty($asp->folio_examen)) {
-            $folio = $this->generarFolioUnico();
+            $folio = FolioGenerator::generate();
             DB::transaction(function () use ($asp, $folio) {
                 $asp->folio_examen = $folio;
                 $asp->save();
@@ -111,7 +114,7 @@ class AdminPagoController extends Controller
             return $this->ok(['folio' => $folio], 'Folio generado');
         }
 
-        $folio = $this->generarFolioUnico();
+        $folio = FolioGenerator::generate();
 
         DB::transaction(function () use ($asp, $folio) {
             $asp->folio_examen = $folio;
@@ -119,18 +122,5 @@ class AdminPagoController extends Controller
         });
 
         return $this->ok(['folio' => $folio], 'Folio generado');
-    }
-
-    /** Genera un folio garantizando unicidad */
-    private function generarFolioUnico(): string
-    {
-        $year = now()->format('Y');
-        do {
-            $rand = str_pad((string) random_int(0, 999999), 6, '0', STR_PAD_LEFT);
-            $folio = "UTH-{$year}-{$rand}";
-            $exists = Aspirante::where('folio_examen', $folio)->exists();
-        } while ($exists);
-
-        return $folio;
     }
 }

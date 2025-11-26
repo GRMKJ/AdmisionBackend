@@ -66,7 +66,12 @@ class AuthAspiranteController extends Controller
 
     public function me(Request $request)
     {
-        return $this->ok(new AspiranteResource($request->user()));
+        $aspirante = $request->user();
+        if ($aspirante) {
+            $aspirante->loadMissing(['bachillerato', 'carrera']);
+        }
+
+        return $this->ok(new AspiranteResource($aspirante));
     }
 
     public function logout(Request $request)
@@ -82,12 +87,12 @@ class AuthAspiranteController extends Controller
             'ap_materno' => ['nullable', 'string', 'max:150'],
             'curp' => ['required', 'string', 'max:18', 'unique:aspirantes,curp'],
             'password' => ['required', Password::min(8)->numbers()->mixedCase()],
-            'email' => ['nullable', 'email', 'max:255'],
-
-            'sexo' => ['nullable', 'in:H,M'],
-            'fecha_nacimiento' => ['nullable', 'date'],
-            'estado_nacimiento' => ['nullable', 'string', 'max:3'],
-            'step' => ['nullable', 'integer', 'min:2', 'max:6'],
+            'email' => ['required', 'email', 'max:255'],
+            'sexo' => ['required', 'in:H,M,X'],
+            'fecha_nacimiento' => ['required', 'date'],
+            'estado_nacimiento' => ['required', 'string', 'max:3'],
+            'telefono' => ['required', 'string', 'max:15'],
+            'step' => ['required', 'integer', 'min:2', 'max:6'],
         ]);
 
         $plainPassword = $data['password'];
@@ -101,12 +106,11 @@ class AuthAspiranteController extends Controller
             'password' => Hash::make($plainPassword),
             'estatus' => 1,              // “pre-registrado”
             'fecha_registro' => now(),
-
-
             'sexo' => $data['sexo'] ?? null,
             'fecha_nacimiento' => $data['fecha_nacimiento'] ?? null,
             'estado_nacimiento' => $data['estado_nacimiento'] ?? null,
             'email' => $email,
+            'telefono' => $data['telefono'] ?? null,
             'progress_step' => $data['step'] ?? 1,
         ]);
 
@@ -127,7 +131,7 @@ class AuthAspiranteController extends Controller
                 'id' => $asp->id_aspirantes,
                 'curp' => $asp->curp,
                 'role' => 'aspirante',
-                'redirect_to' => '/admision/pagoexamen',
+                'redirect_to' => '/admision/bachillerato',
             ],
         ], 'Pre-registro creado', 201);
     }

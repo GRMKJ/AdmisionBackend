@@ -7,16 +7,31 @@ use App\Http\Requests\V1\PagoStoreRequest;
 use App\Http\Requests\V1\PagoUpdateRequest;
 use App\Http\Resources\V1\PagoResource;
 use App\Models\Pago;
+use App\Models\Aspirante;
+use App\Models\ConfiguracionPago;
+use App\Services\PaymentSuccessService;
+use App\Services\StripePaymentService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
-use App\Models\Aspirante;
-use App\Models\Bachillerato;
+use Stripe\StripeClient;
 
 class PagoController extends Controller
 {
     use ApiResponse;
+
+    private const STRIPE_FEE_RATE = 0.036;
+
+    private int $diagnosticConfigId;
+    private int $seguroConfigId;
+
+    public function __construct(private PaymentSuccessService $paymentSuccess)
+    {
+        $this->diagnosticConfigId = (int) config('admissions.diagnostic_payment_config_id', 3);
+        $this->seguroConfigId = (int) config('admissions.seguro_payment_config_id', 4);
+    }
 
     public function index(Request $request)
     {
@@ -51,6 +66,19 @@ class PagoController extends Controller
     public function store(PagoStoreRequest $request)
     {
         $data = $request->validated();
+        $data['id_configuracion'] = $this->diagnosticConfigId;
+
+        $config = ConfiguracionPago::find($this->diagnosticConfigId);
+        if (!$config) {
+            return $this->error('No existe configuración de pago activa.', 422);
+        }
+
+        if (!array_key_exists('monto_pagado', $data) || $data['monto_pagado'] === null) {
+            $data['monto_pagado'] = $config->monto;
+        }
+
+        $data['estado_validacion'] = Pago::EST_VALIDADO;
+        $data['fecha_pago'] = $data['fecha_pago'] ?? now();
 
         // Manejar comprobante si viene
         if ($request->hasFile('comprobante')) {
@@ -65,6 +93,7 @@ class PagoController extends Controller
 
         $row = Pago::create($data);
         $row->load(['aspirante', 'configuracion']);
+        $this->paymentSuccess->handle($row);
 
         return $this->ok(new PagoResource($row), 'Creado', 201);
     }
@@ -156,11 +185,209 @@ class PagoController extends Controller
         return $this->ok(new PagoResource($pago), 'Comprobante borrado');
     }
 
+    public function createStripeSession(Request $request, StripeClient $stripeClient)
+    {
+        $aspirante = $request->user();
+        if (!$aspirante instanceof Aspirante) {
+            return $this->error('Solo los aspirantes pueden iniciar un pago en línea.', 403);
+        }
+
+        $request->validate([
+            'id_configuracion' => ['nullable', 'integer', 'exists:configuracion_pagos,id_configuracion'],
+        ]);
+
+        $configId = $request->integer('id_configuracion') ?: $this->diagnosticConfigId;
+        $config = ConfiguracionPago::find($configId);
+        if (!$config) {
+            return $this->error('No existe configuración de pago activa.', 422);
+        }
+
+        $baseAmount = (float) $config->monto;
+        $totalAmount = round($baseAmount * (1 + self::STRIPE_FEE_RATE), 2);
+        $feeAmount = round($totalAmount - $baseAmount, 2);
+        $currency = strtolower(config('services.stripe.currency', 'mxn'));
+
+        $successUrl = $this->urlWithSessionPlaceholder(
+            $this->resolveStripeSuccessUrl($configId)
+        );
+        $cancelUrl = $this->urlWithSessionPlaceholder(
+            $this->resolveStripeCancelUrl($configId)
+        );
+
+        $metadata = [
+            'aspirante_id' => (string) $aspirante->id_aspirantes,
+            'configuracion_id' => (string) $config->id_configuracion,
+        ];
+
+        $payload = [
+            'mode' => 'payment',
+            'success_url' => $successUrl,
+            'cancel_url' => $cancelUrl,
+            'metadata' => $metadata,
+            'payment_intent_data' => ['metadata' => $metadata],
+            'line_items' => [[
+                'quantity' => 1,
+                'price_data' => [
+                    'currency' => $currency,
+                    'unit_amount' => (int) round($totalAmount * 100),
+                    'product_data' => [
+                        'name' => $config->concepto ?? 'Pago de examen de admisión',
+                    ],
+                ],
+            ]],
+        ];
+
+        if (!empty($aspirante->email)) {
+            $payload['customer_email'] = $aspirante->email;
+        }
+
+        try {
+            $session = $stripeClient->checkout->sessions->create($payload);
+        } catch (\Throwable $e) {
+            Log::error('Error creando sesión de Stripe', ['message' => $e->getMessage()]);
+            return $this->error('No se pudo iniciar el pago con Stripe. Intenta nuevamente.', 502);
+        }
+
+        Pago::updateOrCreate(
+            ['stripe_session_id' => $session->id],
+            [
+                'id_aspirantes' => $aspirante->id_aspirantes,
+                'id_configuracion' => $config->id_configuracion,
+                'tipo_pago' => 'admisión',
+                'metodo_pago' => 'stripe',
+                'estado_validacion' => Pago::EST_PENDIENTE,
+                'referencia' => $session->id,
+            ]
+        );
+
+        return $this->ok([
+            'session_id' => $session->id,
+            'checkout_url' => $session->url,
+            'amount_base' => $baseAmount,
+            'amount_fee' => $feeAmount,
+            'amount_total' => $totalAmount,
+            'currency' => strtoupper($currency),
+            'configuracion' => [
+                'id' => $config->id_configuracion,
+                'concepto' => $config->concepto,
+                'monto' => (float) $config->monto,
+            ],
+        ], 'Sesión de pago creada');
+    }
+
+    public function showStripeSession(
+        string $session,
+        Request $request,
+        StripePaymentService $stripePayments
+    ) {
+        $aspirante = $request->user();
+        if (!$aspirante instanceof Aspirante) {
+            return $this->error('Solo los aspirantes pueden consultar su pago.', 403);
+        }
+
+        $pago = Pago::where('stripe_session_id', $session)
+            ->where('id_aspirantes', $aspirante->id_aspirantes)
+            ->first();
+
+        if (!$pago || $pago->estado_validacion !== Pago::EST_VALIDADO) {
+            try {
+                $stripeSession = $stripePayments->retrieveSession($session);
+                $meta = $this->stripeMetadataArray($stripeSession->metadata ?? []);
+                $sessionAspiranteId = isset($meta['aspirante_id']) ? (int) $meta['aspirante_id'] : null;
+
+                if ($sessionAspiranteId !== null && $sessionAspiranteId !== (int) $aspirante->id_aspirantes) {
+                    return $this->error('Sesión no encontrada.', 404);
+                }
+
+                $pago = $stripePayments->finalizeFromStripeSession($stripeSession) ?? $pago;
+            } catch (\Throwable $e) {
+                Log::warning('Consulta de sesión Stripe pendiente', [
+                    'session' => $session,
+                    'error' => $e->getMessage(),
+                ]);
+
+                if (!$pago) {
+                    return $this->ok([
+                        'session_id' => $session,
+                        'estado_validacion' => null,
+                        'message' => 'Tu pago sigue en proceso, intenta verificar más tarde.',
+                    ], 'Sesión en proceso');
+                }
+            }
+        }
+
+        if (!$pago || (int) $pago->id_aspirantes !== (int) $aspirante->id_aspirantes) {
+            return $this->error('Sesión no encontrada.', 404);
+        }
+
+        return $this->ok($this->formatStripeStatus($pago));
+    }
+
     private function buildFileName(string $original): string
     {
         $name = pathinfo($original, PATHINFO_FILENAME);
         $ext = strtolower(pathinfo($original, PATHINFO_EXTENSION));
         return Str::slug($name) . '-' . time() . '.' . $ext;
+    }
+
+    private function urlWithSessionPlaceholder(?string $url): string
+    {
+        $url = $url ?: config('app.url') . '/admision/pagoexamen';
+        if (str_contains($url, '{CHECKOUT_SESSION_ID}')) {
+            return $url;
+        }
+        $separator = str_contains($url, '?') ? '&' : '?';
+        return $url . $separator . 'session_id={CHECKOUT_SESSION_ID}';
+    }
+
+    private function formatStripeStatus(Pago $pago): array
+    {
+        $pago->loadMissing(['aspirante', 'configuracion']);
+
+        return [
+            'session_id' => $pago->stripe_session_id,
+            'estado_validacion' => $pago->estado_validacion,
+            'referencia' => $pago->referencia,
+            'monto_pagado' => $pago->monto_pagado ? (float) $pago->monto_pagado : null,
+            'currency' => strtoupper(config('services.stripe.currency', 'mxn')),
+            'updated_at' => optional($pago->updated_at)->toIso8601String(),
+            'pago' => new PagoResource($pago),
+        ];
+    }
+
+    private function stripeMetadataArray($metadata): array
+    {
+        if (is_array($metadata)) {
+            return $metadata;
+        }
+
+        if (is_object($metadata) && method_exists($metadata, 'toArray')) {
+            return $metadata->toArray();
+        }
+
+        if (is_object($metadata)) {
+            return (array) $metadata;
+        }
+
+        return [];
+    }
+
+    private function resolveStripeSuccessUrl(int $configId): string
+    {
+        if ($configId === $this->seguroConfigId) {
+            return config('services.stripe.documents_success_url', config('services.stripe.success_url'));
+        }
+
+        return config('services.stripe.success_url');
+    }
+
+    private function resolveStripeCancelUrl(int $configId): string
+    {
+        if ($configId === $this->seguroConfigId) {
+            return config('services.stripe.documents_cancel_url', config('services.stripe.cancel_url'));
+        }
+
+        return config('services.stripe.cancel_url');
     }
 
     public function storeAspirantePago(Request $request)
@@ -174,22 +401,33 @@ class PagoController extends Controller
 
         $aspirante = auth()->user();
 
+        $config = ConfiguracionPago::find($this->diagnosticConfigId);
+        if (!$config) {
+            return response()->json([
+                'success' => false,
+                'message' => 'No existe configuración de pago activa.',
+            ], 422);
+        }
+
         // Asociar Aspirante con el bachillerato existente
         $aspirante->id_bachillerato = $request->bachillerato_id;
         $aspirante->id_carrera = $request->carrera_id;
         $aspirante->promedio_general = $request->promedio;
-        $aspirante->progress_step = 3; // Actualizar paso a 3 (pago)
         $aspirante->save();
 
         // Crear Pago
         $pago = Pago::create([
             'id_aspirantes' => $aspirante->id_aspirantes,
-            'id_configuracion' => 1,
+            'id_configuracion' => $this->diagnosticConfigId,
             'tipo_pago' => 'admisión',
             'metodo_pago' => 'deposito',
             'fecha_pago' => now(),
             'referencia' => $request->referencia,
+            'monto_pagado' => $config->monto,
+            'estado_validacion' => Pago::EST_VALIDADO,
         ]);
+
+        $this->paymentSuccess->handle($pago);
 
         return response()->json([
             'message' => 'Registro de pago exitoso',
