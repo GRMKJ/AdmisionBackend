@@ -164,6 +164,7 @@ Route::prefix('v1')->group(function () {
 
     Route::middleware(['auth:sanctum', 'ability:role:aspirante'])->group(function () {
         Route::get('/aspirantes/progress', [AspiranteController::class, 'progress']);
+        Route::post('/aspirantes/finalize-documents', [AspiranteController::class, 'finalizeDocuments']);
     });
     Route::post('/aspirante/progress', [AspiranteController::class, 'updateProgress'])
     ->middleware('auth:sanctum', 'ability:role:aspirante');
