@@ -96,6 +96,10 @@ Route::prefix('v1')->group(function () {
             ->middleware('ability:role:alumno,role:aspirante,role:administrativo')
             ->name('documentos.history');
 
+        Route::get('documentos/{documento}/archivo/base64', [DocumentoController::class, 'downloadBase64'])
+            ->middleware('ability:role:alumno,role:aspirante,role:administrativo')
+            ->name('documentos.downloadBase64');
+
         // Revisar documento: SOLO administrativos (además pasa por Policy->review)
         Route::patch('documentos/{documento}/revision', [DocumentoController::class, 'review'])
             ->middleware('ability:role:administrativo')

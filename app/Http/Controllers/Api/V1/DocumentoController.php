@@ -10,6 +10,7 @@ use App\Models\Documento;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\File;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use App\Http\Requests\V1\DocumentoReviewRequest;
@@ -262,6 +263,37 @@ public function store(Request $request)
         $documento->load(['aspirante','validador']);
 
         return $this->ok(new DocumentoResource($documento), 'Archivo borrado');
+    }
+
+    public function downloadBase64(Request $request, Documento $documento)
+    {
+        $user = $request->user();
+        $isAdmin = $user && $user->tokenCan('role:administrativo');
+        $isOwner = $user instanceof Aspirante && $documento->id_aspirantes === $user->id_aspirantes;
+
+        if (!$isAdmin && !$isOwner) {
+            return $this->error('No autorizado para consultar este documento.', 403);
+        }
+
+        if (!$documento->archivo_pat || !Storage::disk('public')->exists($documento->archivo_pat)) {
+            return $this->error('El archivo no está disponible.', 404);
+        }
+
+        $disk = Storage::disk('public');
+        $contents = $disk->get($documento->archivo_pat);
+        $localPath = storage_path('app/public/'.$documento->archivo_pat);
+        $mime = File::exists($localPath) ? File::mimeType($localPath) : 'application/octet-stream';
+        $filename = basename($documento->archivo_pat);
+
+        return response()->json([
+            'success' => true,
+            'data' => [
+                'filename' => $filename,
+                'mime_type' => $mime,
+                'size' => strlen($contents),
+                'base64' => base64_encode($contents),
+            ],
+        ]);
     }
 
     private function buildFileName(string $original): string
