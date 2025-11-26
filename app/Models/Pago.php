@@ -28,11 +28,13 @@ class Pago extends Model
         'referencia',
         'estado_validacion',
         'id_admin_validador',
+        'receipt_sent_at',
     ];
 
     protected $casts = [
         'fecha_pago' => 'date',
         'monto_pagado' => 'decimal:2',
+        'receipt_sent_at' => 'datetime',
     ];
     public const EST_PENDIENTE = 0;
     public const EST_VALIDADO  = 1;

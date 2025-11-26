@@ -43,13 +43,15 @@ class PaymentSuccessService
         }
 
         $validEmail = filter_var($aspirante->email, FILTER_VALIDATE_EMAIL) ? $aspirante->email : null;
+        $shouldSendReceipt = $validEmail && !$pago->receipt_sent_at;
 
-        if ($validEmail) {
+        if ($shouldSendReceipt) {
             Mail::to($validEmail)->send(new PaymentReceiptMail($pago));
+            $pago->forceFill(['receipt_sent_at' => now()])->save();
+        }
 
-            if ($folioGenerated && !empty($aspirante->folio_examen)) {
-                Mail::to($validEmail)->send(new FolioGeneradoMail($aspirante, $aspirante->folio_examen));
-            }
+        if ($validEmail && $folioGenerated && !empty($aspirante->folio_examen)) {
+            Mail::to($validEmail)->send(new FolioGeneradoMail($aspirante, $aspirante->folio_examen));
         }
 
         if ($folioGenerated) {

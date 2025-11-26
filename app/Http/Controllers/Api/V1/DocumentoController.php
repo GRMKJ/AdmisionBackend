@@ -729,7 +729,7 @@ public function store(Request $request)
         $nssList = array_unique(array_filter(array_map('trim', $ocrPayload['matches']['NSS'] ?? [])));
         $observaciones = $nssList
             ? 'NSS: '.implode(', ', $nssList)
-            : 'No se detectó NSS en el OCR.';
+            : 'No se detectó NSS en el OCR. Envío a validación manual.';
 
         return [
             'estado' => Documento::ESTADO_PENDIENTE_MANUAL,

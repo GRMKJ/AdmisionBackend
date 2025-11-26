@@ -21,7 +21,11 @@
         <td style="padding:4px 12px;">{{ $pago->metodo_pago ?? 'Stripe' }}</td>
       </tr>
     </table>
-    @if(optional($pago->aspirante)->folio_examen)
+    @php
+      $seguroConfigId = (int) config('admissions.seguro_payment_config_id', 4);
+      $shouldShowFolio = optional($pago->configuracion)->id_configuracion !== $seguroConfigId;
+    @endphp
+    @if($shouldShowFolio && optional($pago->aspirante)->folio_examen)
       <p>Tu folio de examen es:</p>
       <h2 style="margin:8px 0;">{{ $pago->aspirante->folio_examen }}</h2>
     @endif
