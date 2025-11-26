@@ -18,6 +18,7 @@ use App\Http\Resources\V1\DocumentoRevisionResource;
 use App\Models\DocumentoRevision;
 use App\Models\Aspirante;
 use App\Models\Alumno;
+use Illuminate\Http\UploadedFile;
 
 class DocumentoController extends Controller
 {
@@ -53,6 +54,8 @@ public function store(Request $request)
             'estado_validacion' => $this->pendingValidationState($documentName),
         ]
     );
+
+    $this->processDocumentOcr($request->file('archivo'), $doc, $aspirante);
 
     return response()->json([
         'success'   => true,
@@ -189,6 +192,9 @@ public function store(Request $request)
         ]);
 
         $documento->load(['aspirante','validador']);
+
+        $documento->loadMissing('aspirante');
+        $this->processDocumentOcr($request->file('archivo'), $documento, $documento->aspirante);
 
         return $this->ok(new DocumentoResource($documento), 'Archivo subido');
     }
@@ -528,5 +534,228 @@ public function store(Request $request)
         }
 
         return array_values(array_filter(array_unique(explode(' ', $normalized))));
+    }
+
+    private function processDocumentOcr(?UploadedFile $file, Documento $documento, ?Aspirante $aspirante): void
+    {
+        if (!$file || !$aspirante) {
+            return;
+        }
+
+        $ocrPayload = $this->callOcrService($file);
+        if (!$ocrPayload) {
+            return;
+        }
+
+        $analysis = $this->evaluateOcrResult($documento->nombre, $ocrPayload, $aspirante);
+        if (!$analysis) {
+            return;
+        }
+
+        $estado = $analysis['estado'];
+        $observaciones = trim($analysis['observaciones']);
+
+        $documento->forceFill([
+            'estado_validacion' => $estado,
+            'observaciones' => $observaciones,
+            'fecha_validacion' => $estado === Documento::ESTADO_VALIDADO_AUTOMATICO ? now() : null,
+            'id_validador' => null,
+        ])->save();
+
+        DocumentoRevision::create([
+            'id_documentos' => $documento->id_documentos,
+            'id_validador' => null,
+            'estado' => $estado,
+            'observaciones' => $observaciones ?: 'Resultado OCR sin detalles',
+            'fecha_evento' => now(),
+        ]);
+    }
+
+    private function callOcrService(UploadedFile $file): ?array
+    {
+        try {
+            $response = Http::timeout(15)
+                ->attach('file', $file->get(), $file->getClientOriginalName())
+                ->post('http://127.0.0.1:9010/ocr');
+
+            if (!$response->ok()) {
+                return null;
+            }
+
+            $json = $response->json();
+            if (!is_array($json) || empty($json['ok'])) {
+                return null;
+            }
+
+            return $json;
+        } catch (\Throwable $th) {
+            report($th);
+            return null;
+        }
+    }
+
+    private function evaluateOcrResult(?string $documentName, array $ocrPayload, Aspirante $aspirante): ?array
+    {
+        $label = strtoupper(trim((string) $documentName));
+
+        if ($this->looksLikeCurpDocument($label)) {
+            return $this->evaluateCurpDocument($ocrPayload, $aspirante);
+        }
+
+        if ($this->looksLikeActaDocument($label)) {
+            return $this->evaluateActaDocument($ocrPayload, $aspirante);
+        }
+
+        if ($this->looksLikeNssDocument($label)) {
+            return $this->evaluateNssDocument($ocrPayload);
+        }
+
+        if ($this->looksLikeAddressDocument($label)) {
+            return $this->evaluateAddressDocument($ocrPayload);
+        }
+
+        return null;
+    }
+
+    private function evaluateCurpDocument(array $ocrPayload, Aspirante $aspirante): array
+    {
+        $curp = strtoupper((string) $aspirante->curp);
+        $ocrCurps = $this->normalizeCollection($ocrPayload['matches']['CURP'] ?? []);
+        $curpMatch = $curp && in_array($curp, $ocrCurps, true);
+        $nameMatch = $this->ocrContainsAspiranteName($ocrPayload, $aspirante);
+
+        $estado = ($curpMatch && $nameMatch)
+            ? Documento::ESTADO_VALIDADO_AUTOMATICO
+            : Documento::ESTADO_PENDIENTE_MANUAL;
+
+        $observaciones = sprintf(
+            "OCR CURP detectado: %s\nNombre coincide: %s\nCURP OCR: %s",
+            $curpMatch ? 'sí' : 'no',
+            $nameMatch ? 'sí' : 'no',
+            $ocrCurps ? implode(', ', $ocrCurps) : 'Sin coincidencias'
+        );
+
+        return [
+            'estado' => $estado,
+            'observaciones' => $observaciones,
+        ];
+    }
+
+    private function evaluateActaDocument(array $ocrPayload, Aspirante $aspirante): array
+    {
+        $text = $this->normalizeValue($ocrPayload['text'] ?? '');
+        $hasActaKeyword = $this->collectionHasKeyword($ocrPayload['matches']['ACTA_KEYWORDS'] ?? [])
+            || Str::contains($text, 'ACTA')
+            || Str::contains($text, 'NACIMIENTO');
+
+        $curp = strtoupper((string) $aspirante->curp);
+        $ocrCurps = $this->normalizeCollection($ocrPayload['matches']['CURP'] ?? []);
+        $curpMatch = $curp && in_array($curp, $ocrCurps, true);
+        $nameMatch = $this->ocrContainsAspiranteName($ocrPayload, $aspirante);
+
+        $isValid = $nameMatch && ($hasActaKeyword || $curpMatch);
+        $estado = $isValid ? Documento::ESTADO_VALIDADO_AUTOMATICO : Documento::ESTADO_PENDIENTE_MANUAL;
+
+        $observaciones = sprintf(
+            "Nombre coincide: %s\nActa detectada: %s\nCURP presente: %s",
+            $nameMatch ? 'sí' : 'no',
+            $hasActaKeyword ? 'sí' : 'no',
+            $curpMatch ? 'sí' : 'no'
+        );
+
+        return [
+            'estado' => $estado,
+            'observaciones' => $observaciones,
+        ];
+    }
+
+    private function evaluateNssDocument(array $ocrPayload): array
+    {
+        $nssList = array_unique(array_filter(array_map('trim', $ocrPayload['matches']['NSS'] ?? [])));
+        $observaciones = $nssList
+            ? 'NSS detectados: '.implode(', ', $nssList)
+            : 'No se detectaron NSS en el OCR.';
+
+        return [
+            'estado' => Documento::ESTADO_PENDIENTE_MANUAL,
+            'observaciones' => $observaciones,
+        ];
+    }
+
+    private function evaluateAddressDocument(array $ocrPayload): array
+    {
+        $addresses = array_unique(array_filter(array_map('trim', $ocrPayload['matches']['ADDRESS'] ?? [])));
+        $observaciones = $addresses
+            ? "Direcciones detectadas:\n- ".implode("\n- ", $addresses)
+            : 'No se detectaron domicilios en el OCR.';
+
+        return [
+            'estado' => Documento::ESTADO_PENDIENTE_MANUAL,
+            'observaciones' => $observaciones,
+        ];
+    }
+
+    private function looksLikeCurpDocument(string $label): bool
+    {
+        return Str::contains($label, 'CURP');
+    }
+
+    private function looksLikeActaDocument(string $label): bool
+    {
+        return Str::contains($label, 'ACTA');
+    }
+
+    private function looksLikeNssDocument(string $label): bool
+    {
+        return Str::contains($label, 'SEGURO SOCIAL') || Str::contains($label, 'NSS');
+    }
+
+    private function looksLikeAddressDocument(string $label): bool
+    {
+        return Str::contains($label, 'DOMICILIO');
+    }
+
+    private function normalizeCollection(array $values): array
+    {
+        return array_values(array_filter(array_map(function ($value) {
+            return strtoupper($this->normalizeValue((string) $value));
+        }, $values)));
+    }
+
+    private function collectionHasKeyword(array $values): bool
+    {
+        foreach ($values as $value) {
+            if (Str::length(trim($value))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private function ocrContainsAspiranteName(array $ocrPayload, Aspirante $aspirante): bool
+    {
+        $aspiranteName = $this->buildAspiranteName($aspirante);
+        $nameCandidates = $ocrPayload['matches']['NAME'] ?? [];
+
+        foreach ($nameCandidates as $candidate) {
+            if ($this->namesRoughlyMatch($aspiranteName, $candidate)) {
+                return true;
+            }
+        }
+
+        $normalizedText = $this->normalizeValue($ocrPayload['text'] ?? '');
+        $tokens = $this->tokenizeName($aspiranteName);
+        if (!$normalizedText || empty($tokens)) {
+            return false;
+        }
+
+        $hits = 0;
+        foreach ($tokens as $token) {
+            if (Str::contains($normalizedText, $token)) {
+                $hits++;
+            }
+        }
+
+        return $hits >= min(3, count($tokens));
     }
 }
