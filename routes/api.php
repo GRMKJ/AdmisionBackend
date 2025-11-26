@@ -147,6 +147,7 @@ Route::prefix('v1')->group(function () {
         Route::post('/aspirantes/{aspirante}/progress', [AspiranteController::class, 'adminUpdateProgress']);
         Route::post('/examenes/folios/export', [ExamSyncController::class, 'exportFolios']);
         Route::get('/examenes/resultados/sync', [ExamSyncController::class, 'syncResults']);
+        Route::post('/documentos/{documento}/validar-manual', [DocumentoController::class, 'adminManualValidate']);
     });
 
     Route::middleware(['auth:sanctum'])->post('/fcm/register', function (\Illuminate\Http\Request $r) {

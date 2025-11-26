@@ -2,6 +2,7 @@
 
 namespace App\Http\Resources\V1;
 
+use App\Models\Documento;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -56,9 +57,11 @@ class AspiranteResource extends JsonResource
             }),
             'documentos'     => $this->whenLoaded('documentos', function ($documentos) {
                 return $documentos->map(function ($doc) {
-                    $estado = match ((int) $doc->estado_validacion) {
-                        1 => 'Validado',
-                        2 => 'Rechazado',
+                    $estadoCodigo = (int) $doc->estado_validacion;
+                    $estado = match ($estadoCodigo) {
+                        Documento::ESTADO_PENDIENTE_MANUAL => 'Pendiente de validación manual',
+                        Documento::ESTADO_VALIDADO_AUTOMATICO => 'Validado automáticamente',
+                        Documento::ESTADO_VALIDADO_MANUAL => 'Validado manualmente',
                         default => 'Pendiente',
                     };
 

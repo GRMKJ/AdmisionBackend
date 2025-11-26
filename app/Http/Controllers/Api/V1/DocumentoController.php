@@ -17,6 +17,7 @@ use Illuminate\Support\Facades\Auth;
 use App\Http\Resources\V1\DocumentoRevisionResource;
 use App\Models\DocumentoRevision;
 use App\Models\Aspirante;
+use App\Models\Alumno;
 
 class DocumentoController extends Controller
 {
@@ -24,12 +25,14 @@ class DocumentoController extends Controller
 
     private const INSCRIPCION_DOC_NAME = 'Pago de Inscripción y Orden de Cobro';
     private const INSCRIPCION_EXPECTED_CONCEPT = 'CUOTA DE INSCRIPCION O REINSCRIPCION POR CUATRIMESTRE UNIV. TEC. HUEJOTZINGO';
+    private const PHOTO_DOC_NAME = 'Foto Tamaño Infantil';
 
 public function store(Request $request)
 {
+    $documentName = $request->string('documento')->toString();
     $request->validate([
         'documento' => 'required|string',
-        'archivo'   => 'required|file|mimes:pdf|max:2048',
+        'archivo'   => $this->buildUploadRules($documentName),
     ]);
 
     $aspirante = $request->user(); // ✅ ya es aspirante autenticado
@@ -47,7 +50,7 @@ public function store(Request $request)
         [
             'archivo_pat'       => $path,
             'fecha_registro'    => now(),
-            'estado_validacion' => 0,
+            'estado_validacion' => $this->pendingValidationState($documentName),
         ]
     );
 
@@ -117,7 +120,7 @@ public function store(Request $request)
         // si hubo cambio de archivo => resetear validación + AUDITORÍA
         if ($resetValidation) {
             $documento->forceFill([
-                'estado_validacion' => 0,
+                'estado_validacion' => $this->pendingValidationState($documento->nombre),
                 'observaciones'     => null,
                 'fecha_validacion'  => null,
                 'id_validador'      => null,
@@ -151,7 +154,7 @@ public function store(Request $request)
     public function uploadFile(Request $request, Documento $documento)
     {
         $request->validate([
-            'archivo' => ['required','file','max:5120','mimes:pdf,jpg,jpeg,png,doc,docx'],
+            'archivo' => $this->buildUploadRules($documento->nombre),
         ]);
 
         // borra anterior si había
@@ -171,7 +174,7 @@ public function store(Request $request)
 
         // RESET de validación + AUDITORÍA
         $documento->forceFill([
-            'estado_validacion' => 0,
+            'estado_validacion' => $this->pendingValidationState($documento->nombre),
             'observaciones'     => null,
             'fecha_validacion'  => null,
             'id_validador'      => null,
@@ -201,7 +204,7 @@ public function store(Request $request)
 
         // RESET + AUDITORÍA (opcional)
         $documento->forceFill([
-            'estado_validacion' => 0,
+            'estado_validacion' => $this->pendingValidationState($documento->nombre),
             'observaciones'     => null,
             'fecha_validacion'  => null,
             'id_validador'      => null,
@@ -249,6 +252,10 @@ public function store(Request $request)
             'fecha_evento'  => now(),
         ]);
 
+        if ($request->integer('estado') === Documento::ESTADO_VALIDADO_MANUAL) {
+            $this->syncAlumnoPhoto($documento);
+        }
+
         $documento->load(['aspirante','validador']);
         return $this->ok(new DocumentoResource($documento), 'Revisión registrada');
     }
@@ -269,6 +276,45 @@ public function store(Request $request)
             ],
             'data' => DocumentoRevisionResource::collection($p->items()),
         ]);
+    }
+
+    public function adminManualValidate(Request $request, Documento $documento)
+    {
+        if (!auth()->user()?->tokenCan('role:administrativo')) {
+            return $this->error('No autorizado', 403);
+        }
+
+        $data = $request->validate([
+            'comentario' => ['required', 'string', 'min:5'],
+            'original_fisico' => ['sometimes', 'boolean'],
+            'copia_fisico' => ['sometimes', 'boolean'],
+        ]);
+
+        $documento->forceFill([
+            'estado_validacion' => Documento::ESTADO_VALIDADO_MANUAL,
+            'observaciones' => $data['comentario'],
+            'fecha_validacion' => now(),
+            'id_validador' => auth()->id(),
+        ])->save();
+
+        $detalleFisico = sprintf(
+            'Original físico: %s · Copia física: %s',
+            !empty($data['original_fisico']) ? 'Sí' : 'No',
+            !empty($data['copia_fisico']) ? 'Sí' : 'No'
+        );
+
+        DocumentoRevision::create([
+            'id_documentos' => $documento->id_documentos,
+            'id_validador' => auth()->id(),
+            'estado' => Documento::ESTADO_VALIDADO_MANUAL,
+            'observaciones' => trim($data['comentario'] . ' · ' . $detalleFisico),
+            'fecha_evento' => now(),
+        ]);
+
+        $this->syncAlumnoPhoto($documento);
+        $documento->load(['aspirante','validador']);
+
+        return $this->ok(new DocumentoResource($documento), 'Validación manual registrada');
     }
 
     public function validateInscripcionReference(Request $request)
@@ -352,7 +398,7 @@ public function store(Request $request)
         );
 
         $documento->forceFill([
-            'estado_validacion' => 2,
+            'estado_validacion' => Documento::ESTADO_VALIDADO_AUTOMATICO,
             'observaciones' => $observaciones,
             'fecha_validacion' => now(),
             'id_validador' => null,
@@ -361,7 +407,7 @@ public function store(Request $request)
         DocumentoRevision::create([
             'id_documentos' => $documento->id_documentos,
             'id_validador' => null,
-            'estado' => 2,
+            'estado' => Documento::ESTADO_VALIDADO_AUTOMATICO,
             'observaciones' => 'Validación automática por referencia. ' . $observaciones,
             'fecha_evento' => now(),
         ]);
@@ -373,6 +419,37 @@ public function store(Request $request)
             'message' => 'Referencia validada correctamente. Guardamos la evidencia en tu expediente.',
             'documento' => new DocumentoResource($documento),
         ]);
+    }
+
+    private function buildUploadRules(?string $documentName): array
+    {
+        if ($this->isPhotoDocument($documentName)) {
+            return ['required', 'file', 'mimes:jpg,jpeg', 'max:5120'];
+        }
+
+        return ['required', 'file', 'mimes:pdf', 'max:2048'];
+    }
+
+    private function pendingValidationState(?string $documentName): int
+    {
+        return $this->isPhotoDocument($documentName)
+            ? Documento::ESTADO_PENDIENTE_MANUAL
+            : Documento::ESTADO_PENDIENTE;
+    }
+
+    private function isPhotoDocument(?string $documentName): bool
+    {
+        return strcasecmp(trim((string) $documentName), self::PHOTO_DOC_NAME) === 0;
+    }
+
+    private function syncAlumnoPhoto(Documento $documento): void
+    {
+        if (!$this->isPhotoDocument($documento->nombre) || empty($documento->archivo_pat)) {
+            return;
+        }
+
+        Alumno::where('id_aspirantes', $documento->id_aspirantes)
+            ->update(['foto' => $documento->archivo_pat]);
     }
 
     private function inscripcionValidatorUrl(): string
@@ -422,6 +499,7 @@ public function store(Request $request)
         if (!$returnedName) {
             return false;
         }
+
 
         $aspTokens = $this->tokenizeName($aspiranteName);
         $returnedTokens = $this->tokenizeName($returnedName);

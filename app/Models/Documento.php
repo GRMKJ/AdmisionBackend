@@ -11,6 +11,11 @@ class Documento extends Model
 {
     use HasFactory, GeneratesFileUrls; // <-
 
+    public const ESTADO_PENDIENTE = 0;
+    public const ESTADO_PENDIENTE_MANUAL = 1;
+    public const ESTADO_VALIDADO_AUTOMATICO = 2;
+    public const ESTADO_VALIDADO_MANUAL = 3;
+
     protected $table = 'documentos';
     protected $primaryKey = 'id_documentos';
 
