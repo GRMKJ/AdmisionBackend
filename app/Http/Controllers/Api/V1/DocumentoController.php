@@ -801,7 +801,10 @@ public function store(Request $request)
 
     private function looksLikeNssDocument(string $label): bool
     {
-        return Str::contains($label, 'SEGURO SOCIAL') || Str::contains($label, 'NSS');
+        return Str::contains($label, 'SEGURO SOCIAL')
+            || Str::contains($label, 'SEGURIDAD SOCIAL')
+            || Str::contains($label, 'NSS')
+            || Str::contains($label, 'IMSS');
     }
 
     private function looksLikeAddressDocument(string $label): bool
