@@ -10,6 +10,7 @@ return [
             // puede ser string con la ruta del JSON
             'credentials' => env('FIREBASE_CREDENTIALS', storage_path('firebase/sa.json')),
 
+
             // opcional pero recomendado: fuerza el project_id
             'project_id' => env('FIREBASE_PROJECT_ID', 'sii-admision-uth'),
 
