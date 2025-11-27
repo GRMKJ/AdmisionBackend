@@ -59,13 +59,3 @@ If you discover a security vulnerability within Laravel, please send an e-mail t
 ## License
 
 The Laravel framework is open-sourced software licensed under the [MIT license](https://opensource.org/licenses/MIT).
-
-## Firebase service account
-
-Push notifications require a Firebase service account with the **Firebase Admin SDK** role. Provide the credentials in one of the following ways:
-
-1. **Absolute path**: Upload the JSON file to the server (for example `storage/firebase/sa.json`) and set `FIREBASE_CREDENTIALS=/ruta/completa/al/archivo.json` in `.env`.
-2. **Inline JSON**: Copy the raw JSON into the env var `FIREBASE_CREDENTIALS_JSON`. Use this when you cannot create files on the server.
-3. **Base64**: Run `cat sa.json | base64` (or `Get-Content sa.json | Out-String | % { [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($_)) }` on PowerShell) and paste the output into `FIREBASE_CREDENTIALS_BASE64`.
-
-The application first looks for `FIREBASE_CREDENTIALS_JSON`, then `FIREBASE_CREDENTIALS_BASE64`, and finally `FIREBASE_CREDENTIALS`. Relative paths defined in `FIREBASE_CREDENTIALS` are resolved from the project root, so `app/firebase/sa.json` will read `<repo>/app/firebase/sa.json`. Make sure whichever option you pick is deployed to production; otherwise, Firebase initialization will fail with `Failed to open stream: No such file or directory` similar to the error reported on `2025-11-27`.
