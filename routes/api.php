@@ -169,6 +169,8 @@ Route::prefix('v1')->group(function () {
         return response()->json(['ok' => true]);
     });
 
+    Route::middleware(['auth:sanctum'])->post('/notifications/test', [NotificationController::class, 'sendStartupTest']);
+
     Route::middleware(['auth:sanctum', 'ability:role:aspirante'])->group(function () {
         Route::get('/aspirantes/progress', [AspiranteController::class, 'progress']);
         Route::post('/aspirantes/finalize-documents', [AspiranteController::class, 'finalizeDocuments']);

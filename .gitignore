@@ -23,3 +23,4 @@ Homestead.yaml
 Thumbs.db
 
 .env prod
+sa.json

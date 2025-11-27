@@ -55,4 +55,27 @@ class NotificationController extends Controller
             'sent' => $result,
         ]);
     }
+
+    public function sendStartupTest(Request $request, FirebaseNotificationService $notifications)
+    {
+        $data = $request->validate([
+            'token' => 'required|string',
+        ]);
+
+        $result = $notifications->sendToTokens(
+            [$data['token']],
+            'Notificación de prueba',
+            'Recibimos tu token, las notificaciones están activas.',
+            [
+                'tipo' => 'test_startup',
+                'timestamp' => now()->toIso8601String(),
+                'deeplink' => 'siiadmision://inicio',
+            ],
+        );
+
+        return response()->json([
+            'ok' => true,
+            'sent' => $result,
+        ]);
+    }
 }
