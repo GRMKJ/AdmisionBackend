@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Events\FolioGenerado;
 use App\Mail\FolioGeneradoMail;
 use App\Mail\PaymentReceiptMail;
+use App\Models\Aspirante;
 use App\Models\Documento;
 use App\Models\DocumentoRevision;
 use App\Models\Pago;
@@ -15,7 +16,11 @@ class PaymentSuccessService
 {
     private const SEGURO_DOC_NAME = 'Pago de Seguro y Credencial';
 
-    public function handle(Pago $pago): void
+    public function __construct(private FirebaseNotificationService $notifications)
+    {
+    }
+
+    public function handle(Pago $pago, bool $justValidated = false): void
     {
         if ((int) $pago->estado_validacion !== Pago::EST_VALIDADO) {
             return;
@@ -58,7 +63,24 @@ class PaymentSuccessService
             FolioGenerado::dispatch($aspirante->fresh(), $aspirante->folio_examen);
         }
 
+        if ($justValidated) {
+            $this->sendPaymentNotification($pago, $aspirante);
+        }
+
         $this->syncSeguroDocument($pago);
+    }
+
+    private function sendPaymentNotification(Pago $pago, Aspirante $aspirante): void
+    {
+        $concept = trim((string) (optional($pago->configuracion)->concepto ?? 'tu pago'));
+        $title = sprintf('Pago de %s registrado', $concept);
+        $body = 'Regresa a la app para seguir con tu proceso.';
+
+        $this->notifications->notifyAspirante($aspirante, $title, $body, [
+            'tipo' => 'pago_registrado',
+            'id_pago' => (string) $pago->id_pagos,
+            'concepto' => $concept,
+        ]);
     }
 
     private function syncSeguroDocument(Pago $pago): void

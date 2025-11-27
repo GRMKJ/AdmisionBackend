@@ -51,6 +51,8 @@ class StripePaymentService
             $pago->stripe_session_id = $sessionId;
         }
 
+        $wasValidated = (int) $pago->estado_validacion === Pago::EST_VALIDADO;
+
         $amount = $session->amount_total ? round($session->amount_total / 100, 2) : null;
         if ($amount !== null) {
             $pago->monto_pagado = $amount;
@@ -71,10 +73,12 @@ class StripePaymentService
 
         $pago->save();
 
+        $justValidated = !$wasValidated && (int) $pago->estado_validacion === Pago::EST_VALIDADO;
+
         $this->syncAspiranteData($pago->id_aspirantes, $metadata, $pago->estado_validacion);
 
         if ((int) $pago->estado_validacion === Pago::EST_VALIDADO) {
-            $this->paymentSuccess->handle($pago);
+            $this->paymentSuccess->handle($pago, $justValidated);
         }
 
         return $pago->fresh(['aspirante', 'configuracion']);

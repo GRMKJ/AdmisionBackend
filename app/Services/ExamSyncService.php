@@ -16,6 +16,10 @@ class ExamSyncService
 
     private ?bool $hasResultColumns = null;
 
+    public function __construct(private FirebaseNotificationService $notifications)
+    {
+    }
+
     public function exportFolios(): array
     {
         $endpoint = config('exam.export_endpoint');
@@ -191,27 +195,39 @@ class ExamSyncService
 
         $aspirante->save();
 
-        if ($shouldNotify && $aspirante->email) {
+        if ($shouldNotify) {
             $this->notifyResult($aspirante, $status);
         }
     }
 
     private function notifyResult(Aspirante $aspirante, string $status): void
     {
-        if (!filter_var($aspirante->email, FILTER_VALIDATE_EMAIL)) {
-            return;
+        $validEmail = filter_var($aspirante->email, FILTER_VALIDATE_EMAIL);
+
+        if ($validEmail) {
+            if ($status === 'aprobado') {
+                Mail::to($aspirante->email)->send(new ExamResultAcceptedMail($aspirante));
+            } else {
+                Mail::to($aspirante->email)->send(new ExamResultRejectedMail($aspirante));
+            }
+
+            if ($this->canStoreResultMetadata()) {
+                $aspirante->resultado_notificado_at = now();
+                $aspirante->save();
+            }
         }
 
-        if ($status === 'aprobado') {
-            Mail::to($aspirante->email)->send(new ExamResultAcceptedMail($aspirante));
-        } else {
-            Mail::to($aspirante->email)->send(new ExamResultRejectedMail($aspirante));
-        }
+        $title = $status === 'aprobado'
+            ? 'Tu proceso fue aprobado'
+            : 'Tu proceso fue rechazado';
+        $body = $status === 'aprobado'
+            ? 'Ingresa a la app para conocer los siguientes pasos de tu inscripción.'
+            : 'Revisa la app para conocer los detalles y las siguientes indicaciones.';
 
-        if ($this->canStoreResultMetadata()) {
-            $aspirante->resultado_notificado_at = now();
-            $aspirante->save();
-        }
+        $this->notifications->notifyAspirante($aspirante, $title, $body, [
+            'tipo' => 'resultado_examen',
+            'resultado' => $status,
+        ]);
     }
 
     private function canStoreResultMetadata(): bool

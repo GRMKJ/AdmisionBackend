@@ -65,7 +65,7 @@ class AdminPagoController extends Controller
             $pago->fecha_pago = now();
         }
         $pago->save();
-        $paymentSuccess->handle($pago);
+        $paymentSuccess->handle($pago, true);
         return $this->ok(null, 'Pago validado');
     }
 

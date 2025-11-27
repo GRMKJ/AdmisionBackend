@@ -93,7 +93,7 @@ class PagoController extends Controller
 
         $row = Pago::create($data);
         $row->load(['aspirante', 'configuracion']);
-        $this->paymentSuccess->handle($row);
+        $this->paymentSuccess->handle($row, true);
 
         return $this->ok(new PagoResource($row), 'Creado', 201);
     }
@@ -427,7 +427,7 @@ class PagoController extends Controller
             'estado_validacion' => Pago::EST_VALIDADO,
         ]);
 
-        $this->paymentSuccess->handle($pago);
+        $this->paymentSuccess->handle($pago, true);
 
         return response()->json([
             'message' => 'Registro de pago exitoso',

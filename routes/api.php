@@ -17,6 +17,7 @@ use App\Http\Controllers\Api\V1\{
     AdministradorController,
     AdminPagoController,
     PushTokenController,
+    NotificationController,
     StripeWebhookController
 };
 
@@ -152,6 +153,8 @@ Route::prefix('v1')->group(function () {
         Route::post('/examenes/folios/export', [ExamSyncController::class, 'exportFolios']);
         Route::get('/examenes/resultados/sync', [ExamSyncController::class, 'syncResults']);
         Route::post('/documentos/{documento}/validar-manual', [DocumentoController::class, 'adminManualValidate']);
+        Route::post('/notificaciones/aspirantes/{aspirante}', [NotificationController::class, 'notifyAspirante']);
+        Route::post('/notificaciones/tokens', [NotificationController::class, 'notifyTokens']);
     });
 
     Route::middleware(['auth:sanctum'])->post('/fcm/register', function (\Illuminate\Http\Request $r) {
