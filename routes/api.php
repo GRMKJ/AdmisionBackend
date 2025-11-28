@@ -20,6 +20,7 @@ use App\Http\Controllers\Api\V1\{
     NotificationController,
     StripeWebhookController
 };
+use App\Services\ExamSyncService;
 
 Route::get('/login', fn() => abort(401, 'No autenticado'))->name('login');
 
@@ -196,15 +197,37 @@ Route::prefix('v1')->group(function () {
         Route::post('pagos/inscripcion/verify', [DocumentoController::class, 'validateInscripcionReference']);
     });
 
-    Route::post('/admin/aspirantes/{id}/force-step', function ($id) {
+    Route::post('/admin/aspirantes/{id}/force-step', function (Request $request, ExamSyncService $examSync, $id) {
         $asp = \App\Models\Aspirante::findOrFail($id);
-        $asp->progress_step = 4;
+        $data = $request->validate([
+            'step' => ['nullable', 'integer', 'min:1', 'max:' . ExamSyncService::REJECTED_STEP],
+        ]);
+
+        $previousStep = (int) ($asp->progress_step ?? 1);
+        $targetStep = $data['step'] ?? 4;
+
+        $asp->progress_step = $targetStep;
         $asp->save();
+
+        $shouldNotifyRejection = $targetStep === ExamSyncService::REJECTED_STEP
+            && $previousStep !== ExamSyncService::REJECTED_STEP;
+
+        $shouldNotifyApproval = $targetStep >= 5
+            && ($previousStep < 5 || $previousStep === ExamSyncService::REJECTED_STEP);
+
+        if ($shouldNotifyRejection) {
+            $examSync->applyResult($asp->fresh(), 'rechazado', null, true);
+        } elseif ($shouldNotifyApproval) {
+            $examSync->applyResult($asp->fresh(), 'aprobado', $targetStep, true);
+        } else {
+            $asp->refresh();
+        }
 
         return response()->json([
             'success' => true,
-            'message' => "Progreso forzado a step 4",
+            'message' => "Progreso forzado a step {$targetStep}",
             'aspirante' => $asp,
+            'notified' => $shouldNotifyApproval || $shouldNotifyRejection,
         ]);
     })->middleware(['auth:sanctum', 'ability:role:administrativo']);
 
