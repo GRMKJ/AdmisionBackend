@@ -166,18 +166,54 @@ class AuthUnifiedController extends Controller
         // Orden preferente: aspirante -> alumno -> administrativo
         $aspirante = $this->findAspirante($identity);
         if ($aspirante && !empty($aspirante->email)) {
-            try {
-                $this->sendResetLinkEmail(
-                    email: $aspirante->email,
-                    name: trim(($aspirante->nombre ?? '').' '.($aspirante->ap_paterno ?? '')),
-                    role: 'aspirante'
-                );
+            $nuevoPasswordPlano = Str::random(12);
+            $hashAnterior = $aspirante->password;
 
-                $this->notifyPasswordResetLink($aspirante);
+            try {
+                $aspirante->forceFill([
+                    'password' => Hash::make($nuevoPasswordPlano),
+                ])->save();
             } catch (\Throwable $e) {
+                \Log::error('No se pudo actualizar la contraseña temporal del aspirante', [
+                    'aspirante_id' => $aspirante->id_aspirantes ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return $this->error('No se pudo generar una contraseña temporal. Intenta más tarde.', 500);
+            }
+
+            try {
+                Mail::to($aspirante->email)->send(new AspirantePasswordResetMail(
+                    nombre: trim(($aspirante->nombre ?? '').' '.($aspirante->ap_paterno ?? '')) ?: 'Aspirante',
+                    curp: $aspirante->curp,
+                    nuevaContrasena: $nuevoPasswordPlano,
+                ));
+
+                if (method_exists(Mail::class, 'failures') && !empty(Mail::failures())) {
+                    throw new \RuntimeException('El servidor SMTP devolvió fallas: '.implode(', ', Mail::failures()));
+                }
+            } catch (\Throwable $e) {
+                // Revertimos al hash original si el correo no pudo enviarse
+                $aspirante->forceFill(['password' => $hashAnterior])->save();
+
+                \Log::error('No se pudo enviar la contraseña temporal al aspirante', [
+                    'aspirante_id' => $aspirante->id_aspirantes ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+
                 return $this->error('No se pudo enviar el correo de restablecimiento. Intenta más tarde.', 500);
             }
-            return $this->ok(null, 'Si la cuenta existe, hemos enviado un link de restablecimiento.');
+
+            try {
+                $this->notifyTemporaryPasswordIssued($aspirante);
+            } catch (\Throwable $e) {
+                \Log::warning('No se pudo notificar al aspirante sobre la contraseña temporal', [
+                    'aspirante_id' => $aspirante->id_aspirantes ?? null,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            return $this->ok(null, 'Si la cuenta existe, enviamos una contraseña temporal a tu correo.');
         }
 
         $alumno = $this->findAlumno($identity);
@@ -270,9 +306,31 @@ class AuthUnifiedController extends Controller
         return Alumno::where('matricula', $matricula)->first();
     }
 
-    private function findAspirante(string $curp): ?Aspirante
+    private function findAspirante(string $identity): ?Aspirante
     {
-        return Aspirante::where('curp', strtoupper($curp))->first();
+        $clean = trim($identity);
+        if ($clean === '') {
+            return null;
+        }
+
+        $upperIdentity = strtoupper($clean);
+        $lowerIdentity = strtolower($clean);
+        $isEmail = filter_var($clean, FILTER_VALIDATE_EMAIL);
+
+        return Aspirante::query()
+            ->where(function ($query) use ($upperIdentity, $isEmail, $lowerIdentity, $clean) {
+                $query->where('curp', $upperIdentity);
+
+                if ($isEmail) {
+                    $query->orWhereRaw('LOWER(email) = ?', [$lowerIdentity]);
+                }
+
+                // Permite buscar por folio si lo introducen aquí.
+                if (preg_match('/^\w{6,}$/', $clean)) {
+                    $query->orWhere('folio_examen', $clean);
+                }
+            })
+            ->first();
     }
 
     private function findAdministrativo(string $numeroEmpleado): ?Administrativo
@@ -410,6 +468,19 @@ class AuthUnifiedController extends Controller
             $aspirante,
             'Revisa tu correo para restablecer tu contraseña',
             'Te enviamos un enlace para elegir una nueva contraseña.',
+            [
+                'tipo' => 'correo_enviado',
+                'categoria' => 'password_reset',
+            ],
+        );
+    }
+
+    private function notifyTemporaryPasswordIssued(Aspirante $aspirante): void
+    {
+        $this->notifications->notifyAspirante(
+            $aspirante,
+            'Generamos una nueva contraseña temporal',
+            'Revisa tu correo y usa la nueva contraseña para iniciar sesión.',
             [
                 'tipo' => 'correo_enviado',
                 'categoria' => 'password_reset',
