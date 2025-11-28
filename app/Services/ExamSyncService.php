@@ -223,10 +223,15 @@ class ExamSyncService
         $body = $status === 'aprobado'
             ? 'Ingresa a la app para conocer los siguientes pasos de tu inscripción.'
             : 'Revisa la app para conocer los detalles y las siguientes indicaciones.';
+        $deeplink = $status === 'aprobado'
+            ? '/admision/documentos/estado'
+            : '/admision';
 
         $this->notifications->notifyAspirante($aspirante, $title, $body, [
             'tipo' => 'resultado_examen',
+            'categoria' => 'resultado_examen',
             'resultado' => $status,
+            'deeplink' => $deeplink,
         ]);
     }
 
