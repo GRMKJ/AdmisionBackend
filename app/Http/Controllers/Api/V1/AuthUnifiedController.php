@@ -7,6 +7,7 @@ use App\Models\Alumno;
 use App\Models\Aspirante;
 use App\Models\Administrativo;
 use App\Traits\ApiResponse;
+use App\Services\FirebaseNotificationService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Mail;
@@ -20,6 +21,10 @@ use App\Mail\PasswordResetLinkMail;
 class AuthUnifiedController extends Controller
 {
     use ApiResponse;
+
+    public function __construct(private FirebaseNotificationService $notifications)
+    {
+    }
 
     /**
      * POST /api/v1/auth/login
@@ -167,6 +172,8 @@ class AuthUnifiedController extends Controller
                     name: trim(($aspirante->nombre ?? '').' '.($aspirante->ap_paterno ?? '')),
                     role: 'aspirante'
                 );
+
+                $this->notifyPasswordResetLink($aspirante);
             } catch (\Throwable $e) {
                 return $this->error('No se pudo enviar el correo de restablecimiento. Intenta más tarde.', 500);
             }
@@ -395,5 +402,18 @@ class AuthUnifiedController extends Controller
             ]);
             throw $e;
         }
+    }
+
+    private function notifyPasswordResetLink(Aspirante $aspirante): void
+    {
+        $this->notifications->notifyAspirante(
+            $aspirante,
+            'Revisa tu correo para restablecer tu contraseña',
+            'Te enviamos un enlace para elegir una nueva contraseña.',
+            [
+                'tipo' => 'correo_enviado',
+                'categoria' => 'password_reset',
+            ],
+        );
     }
 }

@@ -3,7 +3,6 @@
 namespace App\Services;
 
 use App\Events\FolioGenerado;
-use App\Mail\FolioGeneradoMail;
 use App\Mail\PaymentReceiptMail;
 use App\Models\Aspirante;
 use App\Models\Documento;
@@ -33,6 +32,10 @@ class PaymentSuccessService
         }
 
         $folioGenerated = false;
+        $conceptName = trim((string) optional($pago->configuracion)->concepto);
+        if ($conceptName === '') {
+            $conceptName = 'tu pago';
+        }
 
         if (($aspirante->progress_step ?? 1) < 4) {
             $aspirante->progress_step = 4;
@@ -53,10 +56,17 @@ class PaymentSuccessService
         if ($shouldSendReceipt) {
             Mail::to($validEmail)->send(new PaymentReceiptMail($pago));
             $pago->forceFill(['receipt_sent_at' => now()])->save();
-        }
 
-        if ($validEmail && $folioGenerated && !empty($aspirante->folio_examen)) {
-            Mail::to($validEmail)->send(new FolioGeneradoMail($aspirante, $aspirante->folio_examen));
+            $this->notifyEmailDispatch(
+                aspirante: $aspirante,
+                category: 'payment_receipt',
+                title: 'Enviamos tu recibo de pago',
+                body: 'Consulta tu correo para descargar el comprobante y guardarlo cuando lo necesites.',
+                extra: [
+                    'id_pago' => (string) $pago->id_pagos,
+                    'concepto' => $conceptName,
+                ],
+            );
         }
 
         if ($folioGenerated) {
@@ -121,5 +131,15 @@ class PaymentSuccessService
             'observaciones' => 'Validación automática por pago Stripe.',
             'fecha_evento' => now(),
         ]);
+    }
+
+    private function notifyEmailDispatch(Aspirante $aspirante, string $category, string $title, string $body, array $extra = []): void
+    {
+        $payload = array_merge([
+            'tipo' => 'correo_enviado',
+            'categoria' => $category,
+        ], $extra);
+
+        $this->notifications->notifyAspirante($aspirante, $title, $body, $payload);
     }
 }

@@ -14,6 +14,7 @@ use App\Models\Documento;
 use App\Models\Pago;
 use App\Services\ExamSyncService;
 use App\Services\PaymentSuccessService;
+use App\Services\FirebaseNotificationService;
 use App\Traits\ApiResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\JsonResponse;
@@ -29,6 +30,10 @@ class AspiranteController extends Controller
     use ApiResponse;
     private const ENROLLMENT_YEAR = 2025;
     private const CLASSES_START_DATE = '2025-09-15';
+
+    public function __construct(private FirebaseNotificationService $notifications)
+    {
+    }
 
     public function index(Request $request)
     {
@@ -256,6 +261,17 @@ class AspiranteController extends Controller
 
         if (!empty($aspirante->email) && filter_var($aspirante->email, FILTER_VALIDATE_EMAIL)) {
             Mail::to($aspirante->email)->send(new DocumentsValidatedMail($alumno, $plainPassword));
+
+            $this->notifications->notifyAspirante(
+                $aspirante,
+                'Tus documentos fueron validados',
+                'Revisa tu correo para conocer tu matrícula y contraseña institucional.',
+                [
+                    'tipo' => 'correo_enviado',
+                    'categoria' => 'documentos_validados',
+                    'matricula' => $alumno->matricula,
+                ],
+            );
         }
 
         return response()->json([
@@ -330,6 +346,17 @@ class AspiranteController extends Controller
 
         // Enviar correo
         Mail::to($aspirante->email)->send(new FolioGeneradoMail($aspirante, $aspirante->folio_examen));
+
+        $this->notifications->notifyAspirante(
+            $aspirante,
+            'Reenviamos tu folio',
+            'Consulta tu correo para recuperar el folio y seguir con tu proceso.',
+            [
+                'tipo' => 'correo_enviado',
+                'categoria' => 'folio_reenviado',
+                'folio' => $aspirante->folio_examen,
+            ],
+        );
 
         return response()->json([
             'success' => true,

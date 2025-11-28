@@ -7,7 +7,6 @@ use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvi
 // Importa tu evento y listeners
 use App\Events\FolioGenerado;
 use App\Listeners\EnviarFolioPorCorreo;
-use App\Listeners\EnviarNotificacionFcm;
 
 class EventServiceProvider extends ServiceProvider
 {
@@ -19,7 +18,6 @@ class EventServiceProvider extends ServiceProvider
     protected $listen = [
         FolioGenerado::class => [
             EnviarFolioPorCorreo::class,
-            EnviarNotificacionFcm::class,
         ],
     ];
 

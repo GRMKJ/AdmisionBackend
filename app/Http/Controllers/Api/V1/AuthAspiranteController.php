@@ -15,10 +15,15 @@ use Illuminate\Support\Facades\Mail;
 use App\Mail\AspirantePasswordMailable;
 use App\Models\Pago;
 use Illuminate\Http\JsonResponse;
+use App\Services\FirebaseNotificationService;
 
 class AuthAspiranteController extends Controller
 {
     use ApiResponse;
+
+    public function __construct(private FirebaseNotificationService $notifications)
+    {
+    }
 
     public function register(AspiranteRegisterRequest $request)
     {
@@ -120,6 +125,16 @@ class AuthAspiranteController extends Controller
         if ($email) {
             try {
                 Mail::to($email)->send(new AspirantePasswordMailable($asp, $plainPassword));
+
+                $this->notifications->notifyAspirante(
+                    $asp,
+                    'Te enviamos tu contraseña temporal',
+                    'Revisa tu correo para continuar con tu registro.',
+                    [
+                        'tipo' => 'correo_enviado',
+                        'categoria' => 'credenciales_registro',
+                    ],
+                );
             } catch (\Throwable $e) {
                 report($e);
             }
